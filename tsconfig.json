@@ -1,0 +1,17 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+, "../SafeSchoolRide/app/adminWalletManager.tsx", "../SafeSchoolRide/app/adminRequestedTrips.tsx", "../SafeSchoolRide/app/adminAssign Driver.tsx", "../SafeSchoolRide/app/(tabs)/Admin-settings.tsx", "../SafeSchoolRide/app/(tabs)/Admin-trips.tsx", "../SafeSchoolRide/app/(tabs)/adminDashboard.tsx", "../SafeSchoolRide/app/(tabs)/adminDashboard.tsx", "../SafeSchoolRide/app/(tabs)/Admin-trips.tsx", "../SafeSchoolRide/app/(tabs)/Admin-settings.tsx"  ]
+}
