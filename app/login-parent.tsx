@@ -81,11 +81,11 @@ export default function LoginPage() {
 
       // Redirect based on role
       if (data.user.role === "driver") {
-        router.replace("/driver-dashboard");
+        router.replace("/LoginPage");
       } else if (data.user.role === "parent") {
         router.replace("/ParentDashboard");
       } else if (data.user.role === "admin") {
-        router.replace("/admin-dashboard");
+        router.replace("/adminDashboard");
       } else {
         // Default fallback
         router.replace("/driver-dashboard");
@@ -105,6 +105,9 @@ export default function LoginPage() {
         source={require("../assets/images/LANDING PAGE.png")}
         resizeMode="contain"
       />
+
+      <Text style={styles.pageLabel}>Parent Login Page</Text>
+
 
       <View style={styles.inputContainer}>
         <Text style={styles.label}>Email</Text>
@@ -168,7 +171,7 @@ export default function LoginPage() {
 
       <TouchableOpacity
         style={styles.signupLink}
-        onPress={() => router.push("/CreateAccount")}
+        onPress={() => router.push("/createAccount")}
         disabled={loading}
       >
         <Text style={styles.signupText}>
@@ -263,4 +266,12 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     textDecorationLine: "underline",
   },
+  pageLabel: {
+  fontFamily: "Montserrat",
+  color: "#fff",
+  fontSize: 18,
+  marginBottom: 20,
+  fontWeight: "bold",
+},
+
 });

@@ -12,6 +12,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import  SERVER_URL  from "../config/config";
+const API_BASE_URL = "https://temp-weld-rho.vercel.app";
+
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -21,51 +23,81 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   
 
-const handleLogin = async () => {
-  setLoading(true);
-  setError("");
+  const handleLogin = async () => {
+    console.log("LOGIN BUTTON PRESSED");
 
-  try {
-    // Send POST request to backend
-    const res = await fetch(`http://10.33.33.163/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-      mode: "cors",
-    });
+    // Clear previous errors
+    setError("");
 
-    // Parse JSON safely
-    const data = await res.json().catch(() => ({}));
-
-    // If server returned error
-    if (!res.ok) {
-      setError(data.message || `Server error: ${res.status}`);
-      setLoading(false);
+    // Validate inputs
+    if (!email || !password) {
+      setError("Please enter both email and password");
       return;
     }
 
-    // Save token and role
-    await AsyncStorage.setItem("token", data.token);
-    await AsyncStorage.setItem("role", data.user.role);
+    setLoading(true);
 
-    // Redirect based on role
-    if (data.user.role === "driver") {
-      router.replace("/driver-dashboard");
-    } else if (data.user.role === "parent") {
-      router.replace("/ParentDashboard");
-    } else {
-      router.replace("/");
+    try {
+      console.log("Attempting login for:", email);
+
+      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+      console.log("Server response:", data);
+
+      if (!res.ok) {
+        setError(data.message || `Login failed: ${res.status}`);
+        return;
+      }
+
+      // Verify we have required data
+      if (!data.token || !data.user || !data.user.role) {
+        setError("Invalid response from server");
+        return;
+      }
+
+      // Store token with consistent key name for app-wide use
+      await AsyncStorage.setItem("userToken", data.token);
+      // Also store as "token" for backward compatibility
+      await AsyncStorage.setItem("token", data.token);
+
+      // Store user info
+      await AsyncStorage.setItem("role", data.user.role);
+      await AsyncStorage.setItem("userId", data.user.id);
+      await AsyncStorage.setItem("userName", data.user.name);
+      await AsyncStorage.setItem("userEmail", data.user.email);
+      
+      // Store full user data as JSON
+      await AsyncStorage.setItem("userData", JSON.stringify(data.user));
+
+      console.log("Login successful, role:", data.user.role);
+      console.log("Token stored:", !!data.token);
+
+      // Redirect based on role
+      if (data.user.role === "driver") {
+        router.replace("/driver-dashboard");
+      } else if (data.user.role === "parent") {
+        router.replace("/login-parent");
+      } else if (data.user.role === "admin") {
+        router.replace("/adminDashboard");
+      } else {
+        // Default fallback
+        router.replace("/driver-dashboard");
+      }
+    } catch (err) {
+      console.error("Login error:", err);
+      setError("Unable to connect to server. Please check your internet connection.");
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    console.log("Network error:", err);
-    setError(
-      "Unable to connect to server. Check your network and server IP."
-    );
-  } finally {
-    setLoading(false);
-  }
-};
-
+  };
 
 
   return (
@@ -75,6 +107,7 @@ const handleLogin = async () => {
         source={require("../assets/images/LANDING PAGE.png")}
         resizeMode="contain"
       />
+            <Text style={styles.pageLabel}>Driver Login Page</Text>
 
       <View style={styles.inputContainer}>
         <Text style={styles.label}>Email</Text>
@@ -188,4 +221,13 @@ const styles = StyleSheet.create({
     marginTop: 5,
     fontSize: 14,
   },
+  pageLabel: {
+  fontFamily: "Montserrat",
+  color: "#fff",
+  fontSize: 18,
+  marginBottom: 20,
+  fontWeight: "bold",
+},
+
+  
 });
