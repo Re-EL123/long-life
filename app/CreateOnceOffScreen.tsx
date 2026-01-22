@@ -23,7 +23,7 @@ const API_BASE_URL =
 
 // ✅ BigDataCloud API base (place autocomplete / geocoding)
 const BIGDATACLOUD_PLACES_URL =
-  "https://api.bigdatacloud.net/data/reverse-geocode-client"; // example endpoint for reverse geocode[web:69]
+  "https://api.bigdatacloud.net/data/reverse-geocode-client"; // example endpoint for reverse geocode
 // For forward search you might use a different BDC endpoint if desired.
 
 /**
@@ -199,7 +199,7 @@ const CreateOnceOffScreen = () => {
       setPickupSuggestionsLoading(true);
 
       // Example: if you already have coordinates, you could reverse-geocode.
-      // For text search, BigDataCloud has other endpoints; adjust accordingly[web:69].
+      // For text search, BigDataCloud has other endpoints; adjust accordingly.
       // Here we mock suggestions based on current pickupCoords.
       const resp = await fetch(
         `${BIGDATACLOUD_PLACES_URL}?latitude=${pickupCoords.latitude}&longitude=${pickupCoords.longitude}&localityLanguage=en`
@@ -378,7 +378,7 @@ const CreateOnceOffScreen = () => {
     }
   };
 
-  // ✅ Create once-off trip
+  // ✅ Create once-off trip - FIXED ENDPOINT
   const handleCreateTrip = async () => {
     if (!selectedDriver) {
       const message = "Please select a driver";
@@ -397,10 +397,10 @@ const CreateOnceOffScreen = () => {
         (await AsyncStorage.getItem("token"));
 
       const tripPayload = {
+        tripType: "once-off", // ← ADDED: Required for consolidated endpoint
         parentId: tripData?.parentId,
         driverId: selectedDriver._id,
         driverName: selectedDriver.name,
-        tripType: "once-off",
         date: tripData?.date,
         pickupTime: tripData?.pickupTime,
         pickupLocation: {
@@ -422,8 +422,9 @@ const CreateOnceOffScreen = () => {
 
       console.log("[CreateOnceOff] Creating trip with payload:", tripPayload);
 
+      // ✅ FIXED: Changed from /api/trips/create-once-off to /api/trips
       const response = await fetch(
-        `${API_BASE_URL}/api/trips/create-once-off`,
+        `${API_BASE_URL}/api/trips`,
         {
           method: "POST",
           headers: {
@@ -952,6 +953,7 @@ const CreateOnceOffScreen = () => {
     </View>
   );
 };
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1355,6 +1357,5 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 });
-
 
 export default CreateOnceOffScreen;
