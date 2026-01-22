@@ -52,10 +52,10 @@ export default function DriverDashboard() {
           return;
         }
 
-        // data.user comes from your /api/user/profile handler
+        // data.user comes from /api/user/profile
         setDriverData(data.user);
-        // When you add isActive to user in backend, map it here:
-        // setIsActive(!!data.user.isActive);
+        // Map backend isActive into UI switch
+        setIsActive(!!data.user.isActive);
       } catch (error) {
         console.error('Failed to load driver dashboard:', error);
       } finally {
@@ -67,8 +67,7 @@ export default function DriverDashboard() {
   }, []);
 
   const toggleActive = async (value: boolean) => {
-    // For now this only updates local state.
-    // Later you can wire it to an API like /api/user/toggle-active.
+    // Update UI immediately for responsiveness
     setIsActive(value);
     try {
       const storedToken =
@@ -79,19 +78,28 @@ export default function DriverDashboard() {
         return;
       }
 
-      // TODO: implement a backend endpoint that updates the user status
-      // Example:
-      // const response = await fetch(`${API_BASE_URL}/api/user/toggle-active`, {
-      //   method: 'PUT',
-      //   headers: {
-      //     Authorization: `Bearer ${storedToken}`,
-      //     'Content-Type': 'application/json',
-      //   },
-      //   body: JSON.stringify({ isActive: value }),
-      // });
-      // const data = await response.json();
-      // if (!data.success) throw new Error('Failed to update status');
+      // Call a simple toggle-active endpoint that updates User.isActive
+      const response = await fetch(`${API_BASE_URL}/api/user/toggle-active`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${storedToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ isActive: value }),
+      });
 
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        console.error('Toggle active failed:', data);
+        setIsActive(!value);
+        return;
+      }
+
+      // Keep driverData in sync with backend
+      setDriverData((prev: any) =>
+        prev ? { ...prev, isActive: data.user.isActive } : prev
+      );
     } catch (error) {
       console.error('Failed to toggle active status:', error);
       setIsActive(!value);
@@ -160,9 +168,9 @@ export default function DriverDashboard() {
           colors={['#5A0FC8', '#5A0FC8']}
           style={styles.earningCard}
         >
-          {/* Backend does not yet send totalEarningsToday; default to 0 */}
+          {/* Backend now sends totalEarnings (today) */}
           <Text style={styles.earningAmountWhite}>
-            R{driverData?.totalEarnings || 0}
+            R{driverData?.totalEarnings ?? 0}
           </Text>
         </LinearGradient>
 
