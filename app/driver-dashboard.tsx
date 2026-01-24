@@ -79,7 +79,7 @@ export default function DriverDashboard() {
       }
 
       // Call a simple toggle-active endpoint that updates User.isActive
-      const response = await fetch(`${API_BASE_URL}/api/user/toggle-active`, {
+      const response = await fetch(`${API_BASE_URL}/api/user/profile`, {
         method: 'PUT',
         headers: {
           Authorization: `Bearer ${storedToken}`,
