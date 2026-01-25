@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import React from 'react';
 
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL || 'https://temp-weld-rho.vercel.app';
@@ -32,7 +33,6 @@ export default function DriverDashboard() {
         if (!storedToken) {
           console.log('No token found, redirecting to login');
           setLoading(false);
-          // Optional: router.replace('/login');
           return;
         }
 
@@ -52,9 +52,7 @@ export default function DriverDashboard() {
           return;
         }
 
-        // data.user comes from /api/user/profile
         setDriverData(data.user);
-        // Map backend isActive into UI switch
         setIsActive(!!data.user.isActive);
       } catch (error) {
         console.error('Failed to load driver dashboard:', error);
@@ -67,7 +65,6 @@ export default function DriverDashboard() {
   }, []);
 
   const toggleActive = async (value: boolean) => {
-    // Update UI immediately for responsiveness
     setIsActive(value);
     try {
       const storedToken =
@@ -78,7 +75,6 @@ export default function DriverDashboard() {
         return;
       }
 
-      // Call a simple toggle-active endpoint that updates User.isActive
       const response = await fetch(`${API_BASE_URL}/api/user/profile`, {
         method: 'PUT',
         headers: {
@@ -96,7 +92,6 @@ export default function DriverDashboard() {
         return;
       }
 
-      // Keep driverData in sync with backend
       setDriverData((prev: any) =>
         prev ? { ...prev, isActive: data.user.isActive } : prev
       );
@@ -131,12 +126,19 @@ export default function DriverDashboard() {
         <Text style={styles.welcome}>
           Welcome {driverData?.name || 'Driver'}
         </Text>
+        {/* ✅ Display car registration number below name */}
+        {driverData?.registrationNumber && (
+          <Text style={styles.carRegistration}>
+            {driverData.registrationNumber} • {driverData.carBrand} {driverData.carModel}
+          </Text>
+        )}
 
         <View
           style={{
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
+            marginTop: 12,
           }}
         >
           <Text style={styles.heading}>ACTIVE</Text>
@@ -168,7 +170,6 @@ export default function DriverDashboard() {
           colors={['#5A0FC8', '#5A0FC8']}
           style={styles.earningCard}
         >
-          {/* Backend now sends totalEarnings (today) */}
           <Text style={styles.earningAmountWhite}>
             R{driverData?.totalEarnings ?? 0}
           </Text>
@@ -229,6 +230,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   welcome: { fontSize: 16, color: '#fff', marginBottom: 4 },
+  carRegistration: { fontSize: 13, color: '#E0E0E0', marginBottom: 8 }, // ✅ New style
   heading: { fontSize: 22, fontWeight: 'bold', color: '#fff' },
   contentContainer: { padding: 20 },
   subheading: { fontSize: 18, fontWeight: '600', marginBottom: 10, color: '#333' },
