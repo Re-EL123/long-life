@@ -153,7 +153,7 @@ const ChildDetailsScreen: React.FC = () => {
 
 
       const res = await fetch(
-        `https://temp-weld-rho.vercel.app/api/user/children/${childId}/photo`,
+        `https://safe-school-ride.duckdns.org/api/user/children/${childId}/photo`,
         {
           method: "POST",
           headers: {
@@ -196,7 +196,7 @@ const ChildDetailsScreen: React.FC = () => {
 
       // ✅ FIXED: Added surname to API call
       const res = await fetch(
-        "https://temp-weld-rho.vercel.app/api/user/children",
+        "https://safe-school-ride.duckdns.org/api/user/children",
         {
           method: "POST",
           headers: {

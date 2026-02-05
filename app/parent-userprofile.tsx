@@ -185,7 +185,7 @@ const UserProfileScreen = () => {
 
       // Fetch full user profile from backend
       try {
-        const res = await fetch(`https://temp-weld-rho.vercel.app/api/user/profile`, {
+        const res = await fetch(`https://safe-school-ride.duckdns.org/api/user/profile`, {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -207,7 +207,7 @@ const UserProfileScreen = () => {
               
               // Update backend with current location
               try {
-                await fetch(`https://temp-weld-rho.vercel.app/api/user/profile`, {
+                await fetch(`https://safe-school-ride.duckdns.org/api/user/profile`, {
                   method: 'PUT',
                   headers: {
                     'Authorization': `Bearer ${token}`,
@@ -305,7 +305,7 @@ const UserProfileScreen = () => {
               // Update backend
               try {
                 const token = await AsyncStorage.getItem('token');
-                const updateRes = await fetch(`https://temp-weld-rho.vercel.app/api/user/profile`, {
+                const updateRes = await fetch(`https://safe-school-ride.duckdns.org/api/user/profile`, {
                   method: 'PUT',
                   headers: {
                     'Authorization': `Bearer ${token}`,

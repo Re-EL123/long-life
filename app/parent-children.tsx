@@ -44,7 +44,7 @@ const ChildrenScreen = () => {
       }
 
       // Fetch children from backend
-      const response = await fetch(`https://temp-weld-rho.vercel.app/api/user/children`, {
+      const response = await fetch(`https://safe-school-ride.duckdns.org/api/user/children`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,

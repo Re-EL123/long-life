@@ -13,7 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons, Feather } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 
-const API_BASE_URL = 'https://temp-weld-rho.vercel.app';
+const API_BASE_URL = 'https://safe-school-ride.duckdns.org';
 
 interface ChildData {
   _id?: string;

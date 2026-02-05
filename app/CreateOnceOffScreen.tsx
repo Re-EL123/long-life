@@ -18,7 +18,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MapView, Marker, PROVIDER_GOOGLE } from "./MapComponent";
 
 // ✅ API URL
-const API_BASE_URL ="https://temp-weld-rho.vercel.app";
+const API_BASE_URL ="https://safe-school-ride.duckdns.org";
 
 // ✅ BigDataCloud API base (place autocomplete / geocoding)
 const BIGDATACLOUD_PLACES_URL =

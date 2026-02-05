@@ -55,7 +55,7 @@ const CrossPlatformDateTimePicker = Platform.OS === "web"
 
 // ✅ API URL
 const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || "https://temp-weld-rho.vercel.app";
+  process.env.EXPO_PUBLIC_API_URL || "https://safe-school-ride.duckdns.org";
 
 // ✅ Child interface
 interface Child {

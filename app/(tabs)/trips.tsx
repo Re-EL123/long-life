@@ -17,7 +17,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // ✅ API URL
 const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || "https://temp-weld-rho.vercel.app";
+  process.env.EXPO_PUBLIC_API_URL || "https://safe-school-ride.duckdns.org";
 
 // ✅ Trip Interface
 interface Trip {

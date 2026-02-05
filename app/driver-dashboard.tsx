@@ -16,7 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React from 'react';
 
 const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL || 'https://temp-weld-rho.vercel.app';
+  process.env.EXPO_PUBLIC_API_URL || 'https://safe-school-ride.duckdns.org';
 
 export default function DriverDashboard() {
   const [driverData, setDriverData] = useState<any>(null);

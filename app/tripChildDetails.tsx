@@ -15,7 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://temp-weld-rho.vercel.app";
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "https://safe-school-ride.duckdns.org";
 
 const ChildDetailsScreen = () => {
   const [name, setName] = useState("");

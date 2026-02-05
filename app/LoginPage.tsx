@@ -16,7 +16,7 @@ import { Ionicons } from "@expo/vector-icons";
 import SERVER_URL from "../config/config";
 import { checkDriverOnboarding, clearOnboardingCache } from "../utils/checkOnboarding";
 
-const API_BASE_URL = "https://temp-weld-rho.vercel.app";
+const API_BASE_URL = "https://safe-school-ride.duckdns.org";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");

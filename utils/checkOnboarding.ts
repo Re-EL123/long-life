@@ -1,7 +1,7 @@
 // utils/checkOnboarding.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_URL = 'https://temp-weld-rho.vercel.app';
+const API_URL = 'https://safe-school-ride.duckdns.org';
 
 /**
  * Check driver onboarding status

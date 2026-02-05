@@ -13,7 +13,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 
-const API_BASE_URL = "https://temp-weld-rho.vercel.app";
+const API_BASE_URL = "https://safe-school-ride.duckdns.org";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");

@@ -48,7 +48,7 @@ const CreateAccount = () => {
     setLoading(true);
 
     try {
-      const res = await fetch('https://temp-weld-rho.vercel.app/api/auth/register', {
+      const res = await fetch('https://safe-school-ride.duckdns.org/api/auth/register', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',

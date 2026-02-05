@@ -17,7 +17,7 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Backend API URL
-const API_URL = 'https://temp-weld-rho.vercel.app';
+const API_URL = 'https://safe-school-ride.duckdns.org';
 
 // Define shape of the form data
 interface DriverOnboardingData {
