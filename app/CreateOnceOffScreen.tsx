@@ -17,8 +17,9 @@ import { router, useLocalSearchParams } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { MapView, Marker, PROVIDER_GOOGLE } from "./MapComponent";
 
+
 // ✅ API URL
-const API_BASE_URL ="https://safe-school-ride.duckdns.org";
+const API_BASE_URL = "https://safe-school-ride.duckdns.org";
 
 // ✅ BigDataCloud API base (place autocomplete / geocoding)
 const BIGDATACLOUD_PLACES_URL =
@@ -95,8 +96,11 @@ const CreateOnceOffScreen = () => {
 
   // ✅ BigDataCloud pickup suggestions
   const [pickupQuery, setPickupQuery] = useState("");
-  const [pickupSuggestions, setPickupSuggestions] = useState<PlaceSuggestion[]>([]);
-  const [pickupSuggestionsLoading, setPickupSuggestionsLoading] = useState(false);
+  const [pickupSuggestions, setPickupSuggestions] = useState<PlaceSuggestion[]>(
+    []
+  );
+  const [pickupSuggestionsLoading, setPickupSuggestionsLoading] =
+    useState(false);
 
   // Drivers state
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -106,7 +110,9 @@ const CreateOnceOffScreen = () => {
   // UI state
   const [loading, setLoading] = useState(false);
   const [showDriverList, setShowDriverList] = useState(false);
-  const [step, setStep] = useState<"locations" | "drivers" | "confirm">("locations");
+  const [step, setStep] = useState<"locations" | "drivers" | "confirm">(
+    "locations"
+  );
 
   const mapRef = useRef<any>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -143,10 +149,8 @@ const CreateOnceOffScreen = () => {
     }).start();
   }, []);
 
-  // ✅ Handle map press to set location (Native only)
+  // ✅ Handle map press to set location (now works on web too)
   const handleMapPress = (e: any) => {
-    if (Platform.OS === "web") return;
-
     const { latitude, longitude } = e.nativeEvent.coordinate;
 
     if (isSettingPickup) {
@@ -197,9 +201,6 @@ const CreateOnceOffScreen = () => {
     try {
       setPickupSuggestionsLoading(true);
 
-      // Example: if you already have coordinates, you could reverse-geocode.
-      // For text search, BigDataCloud has other endpoints; adjust accordingly.
-      // Here we mock suggestions based on current pickupCoords.
       const resp = await fetch(
         `${BIGDATACLOUD_PLACES_URL}?latitude=${pickupCoords.latitude}&longitude=${pickupCoords.longitude}&localityLanguage=en`
       );
@@ -242,7 +243,12 @@ const CreateOnceOffScreen = () => {
     setPickupSuggestions([]);
 
     // Optionally update map region (native only)
-    if (Platform.OS !== "web" && mapRef.current && suggestion.latitude && suggestion.longitude) {
+    if (
+      Platform.OS !== "web" &&
+      mapRef.current &&
+      suggestion.latitude &&
+      suggestion.longitude
+    ) {
       mapRef.current.animateToRegion({
         latitude: suggestion.latitude,
         longitude: suggestion.longitude,
@@ -422,17 +428,14 @@ const CreateOnceOffScreen = () => {
       console.log("[CreateOnceOff] Creating trip with payload:", tripPayload);
 
       // ✅ FIXED: Changed from /api/trips/create-once-off to /api/trips
-      const response = await fetch(
-        `${API_BASE_URL}/api/trips`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(tripPayload),
-        }
-      );
+      const response = await fetch(`${API_BASE_URL}/api/trips`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(tripPayload),
+      });
 
       const result = await response.json();
       console.log("[CreateOnceOff] Trip creation response:", result);
@@ -525,9 +528,9 @@ const CreateOnceOffScreen = () => {
     fetchDrivers();
   };
 
-  // ✅ Render Native Map
-  const renderNativeMap = () => {
-    if (Platform.OS === "web" || !MapView) return null;
+  // ✅ Cross‑platform Map render (uses MapComponent native/web)
+  const renderMap = () => {
+    if (!MapView) return null;
 
     return (
       <MapView
@@ -597,21 +600,6 @@ const CreateOnceOffScreen = () => {
     );
   };
 
-  // ✅ Render Web Map Placeholder
-  const renderWebMap = () => {
-    if (Platform.OS !== "web") return null;
-
-    return (
-      <View style={styles.webMapPlaceholder}>
-        <Ionicons name="map-outline" size={64} color="#E0E0E0" />
-        <Text style={styles.webMapText}>Map View</Text>
-        <Text style={styles.webMapSubtext}>
-          Use the fields below to set your locations
-        </Text>
-      </View>
-    );
-  };
-
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -625,9 +613,8 @@ const CreateOnceOffScreen = () => {
         </View>
       </View>
 
-      {/* Map - Conditional Rendering */}
-      {renderNativeMap()}
-      {renderWebMap()}
+      {/* Map */}
+      {renderMap()}
 
       {/* Bottom Sheet */}
       <Animated.View

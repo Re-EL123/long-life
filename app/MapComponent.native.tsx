@@ -1,8 +1,12 @@
+// app/MapComponent.native.tsx
 import React from "react";
-import { View } from "react-native";
-import MapViewBase, { Marker as MarkerBase, UrlTile } from "react-native-maps";
+import MapViewBase, {
+  Marker as MarkerBase,
+  UrlTile,
+  PROVIDER_GOOGLE as RN_PROVIDER_GOOGLE,
+} from "react-native-maps";
 
-export const PROVIDER_GOOGLE = "osm";
+export const PROVIDER_GOOGLE = RN_PROVIDER_GOOGLE;
 
 type LatLng = { latitude: number; longitude: number };
 type Region = LatLng & { latitudeDelta: number; longitudeDelta: number };
@@ -27,6 +31,7 @@ export const MapView: React.FC<MapViewProps> = (props) => (
     style={props.style}
     initialRegion={props.initialRegion}
     onPress={props.onPress}
+    provider={PROVIDER_GOOGLE}
   >
     <UrlTile urlTemplate="https://tile.openstreetmap.org/{z}/{x}/{y}.png" />
     {props.children}
