@@ -1,11 +1,45 @@
-// mobile/app/MapComponent.tsx
 import React from "react";
+import { View } from "react-native";
+import MapViewBase, { Marker as MarkerBase, UrlTile } from "react-native-maps";
 
-// Dummy MapView component (renders nothing for now)
-export const MapView: React.ComponentType<any> | null = (props: any) => null;
+export const PROVIDER_GOOGLE = "osm";
 
-// Dummy Marker component so `<Marker />` is valid JSX
-export const Marker: React.ComponentType<any> = (props: any) => null;
+type LatLng = { latitude: number; longitude: number };
+type Region = LatLng & { latitudeDelta: number; longitudeDelta: number };
 
-// Not used in dummy mode, but exported to satisfy imports
-export const PROVIDER_GOOGLE = null;
+type MapViewProps = {
+  style?: any;
+  initialRegion: Region;
+  onPress?: (e: { nativeEvent: { coordinate: LatLng } }) => void;
+  children?: React.ReactNode;
+};
+
+type MarkerProps = {
+  coordinate: LatLng;
+  title?: string;
+  description?: string;
+  pinColor?: string;
+  children?: React.ReactNode;
+};
+
+export const MapView: React.FC<MapViewProps> = (props) => (
+  <MapViewBase
+    style={props.style}
+    initialRegion={props.initialRegion}
+    onPress={props.onPress}
+  >
+    <UrlTile urlTemplate="https://tile.openstreetmap.org/{z}/{x}/{y}.png" />
+    {props.children}
+  </MapViewBase>
+);
+
+export const Marker: React.FC<MarkerProps> = (props) => (
+  <MarkerBase
+    coordinate={props.coordinate}
+    title={props.title}
+    description={props.description}
+    pinColor={props.pinColor}
+  >
+    {props.children}
+  </MarkerBase>
+);
