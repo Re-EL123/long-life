@@ -1,4 +1,4 @@
-// CreateOnceOffScreen.tsx - Professional OSM-Powered Trip Creation
+// CreateOnceOffScreen.tsx - Production OSM-Powered Trip Creation
 import React, { useState, useEffect, useRef } from "react";
 import {
   View,
@@ -34,13 +34,16 @@ interface OSMPlace {
     road?: string;
     suburb?: string;
     city?: string;
+    state?: string;
+    postcode?: string;
     country?: string;
+    house_number?: string;
   };
 }
 
 interface RouteData {
-  distance: number; // in meters
-  duration: number; // in seconds
+  distance: number;
+  duration: number;
   coordinates: Array<{ latitude: number; longitude: number }>;
 }
 
@@ -53,6 +56,9 @@ interface Driver {
   latitude: number;
   longitude: number;
   available: boolean;
+  registrationNumber?: string;
+  carBrand?: string;
+  carModel?: string;
 }
 
 interface TripChild {
@@ -133,7 +139,6 @@ const CreateOnceOffScreen = () => {
         setTripData(data);
         console.log("[CreateOnceOff] Trip data loaded:", data);
 
-        // Set initial locations from first child
         if (data.children && data.children.length > 0) {
           const child = data.children[0];
           setPickupLocation(child.homeAddress);
@@ -141,7 +146,6 @@ const CreateOnceOffScreen = () => {
           setDropoffLocation(child.schoolAddress);
           setDropoffQuery(child.schoolAddress);
 
-          // Geocode initial addresses
           geocodeAddress(child.homeAddress, "pickup");
           geocodeAddress(child.schoolAddress, "dropoff");
         }
@@ -170,7 +174,7 @@ const CreateOnceOffScreen = () => {
     }
   }, [pickupCoords, dropoffCoords]);
 
-  // ✅ OSM Nominatim Search
+  // ✅ OSM Nominatim Search with precise results
   const searchOSMPlaces = async (query: string, type: "pickup" | "dropoff") => {
     if (!query || query.trim().length < 3) {
       if (type === "pickup") setPickupSuggestions([]);
@@ -182,16 +186,16 @@ const CreateOnceOffScreen = () => {
       if (type === "pickup") setPickupSearchLoading(true);
       else setDropoffSearchLoading(true);
 
-      // Nominatim search with South Africa bias
       const response = await fetch(
         `${NOMINATIM_BASE_URL}/search?` +
           new URLSearchParams({
             q: query,
             format: "json",
             addressdetails: "1",
-            limit: "5",
-            countrycodes: "za", // South Africa
+            limit: "8",
+            countrycodes: "za",
             "accept-language": "en",
+            dedupe: "1",
           }),
         {
           headers: {
@@ -215,7 +219,7 @@ const CreateOnceOffScreen = () => {
     }
   };
 
-  // ✅ Geocode address (for initial load)
+  // ✅ Geocode address
   const geocodeAddress = async (address: string, type: "pickup" | "dropoff") => {
     try {
       const response = await fetch(
@@ -225,6 +229,7 @@ const CreateOnceOffScreen = () => {
             format: "json",
             limit: "1",
             countrycodes: "za",
+            addressdetails: "1",
           }),
         {
           headers: {
@@ -256,7 +261,7 @@ const CreateOnceOffScreen = () => {
     }
   };
 
-  // ✅ Reverse Geocode (when tapping map)
+  // ✅ Reverse Geocode
   const reverseGeocode = async (
     latitude: number,
     longitude: number,
@@ -320,12 +325,11 @@ const CreateOnceOffScreen = () => {
         );
 
         setRouteData({
-          distance: route.distance, // meters
-          duration: route.duration, // seconds
+          distance: route.distance,
+          duration: route.duration,
           coordinates,
         });
 
-        // Fit map to show entire route
         if (Platform.OS !== "web" && mapRef.current) {
           mapRef.current.fitToCoordinates(coordinates, {
             edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
@@ -346,14 +350,13 @@ const CreateOnceOffScreen = () => {
     setPickupLocation(text);
     setActiveInput("pickup");
 
-    // Debounce search
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
 
     searchTimeoutRef.current = setTimeout(() => {
       searchOSMPlaces(text, "pickup");
-    }, 500);
+    }, 300);
   };
 
   // ✅ Handle dropoff input change
@@ -362,14 +365,28 @@ const CreateOnceOffScreen = () => {
     setDropoffLocation(text);
     setActiveInput("dropoff");
 
-    // Debounce search
     if (searchTimeoutRef.current) {
       clearTimeout(searchTimeoutRef.current);
     }
 
     searchTimeoutRef.current = setTimeout(() => {
       searchOSMPlaces(text, "dropoff");
-    }, 500);
+    }, 300);
+  };
+
+  // ✅ Format address for display
+  const formatAddress = (place: OSMPlace): string => {
+    const addr = place.address;
+    if (!addr) return place.display_name;
+
+    const parts = [];
+    if (addr.house_number) parts.push(addr.house_number);
+    if (addr.road) parts.push(addr.road);
+    if (addr.suburb) parts.push(addr.suburb);
+    if (addr.city) parts.push(addr.city);
+    if (addr.postcode) parts.push(addr.postcode);
+
+    return parts.length > 0 ? parts.join(", ") : place.display_name;
   };
 
   // ✅ Select pickup suggestion
@@ -379,13 +396,13 @@ const CreateOnceOffScreen = () => {
       longitude: parseFloat(place.lon),
     };
 
-    setPickupLocation(place.display_name);
-    setPickupQuery(place.display_name);
+    const formattedAddress = formatAddress(place);
+    setPickupLocation(formattedAddress);
+    setPickupQuery(formattedAddress);
     setPickupCoords(coords);
     setPickupSuggestions([]);
     setActiveInput(null);
 
-    // Animate to location
     if (Platform.OS !== "web" && mapRef.current) {
       mapRef.current.animateToRegion({
         ...coords,
@@ -402,13 +419,13 @@ const CreateOnceOffScreen = () => {
       longitude: parseFloat(place.lon),
     };
 
-    setDropoffLocation(place.display_name);
-    setDropoffQuery(place.display_name);
+    const formattedAddress = formatAddress(place);
+    setDropoffLocation(formattedAddress);
+    setDropoffQuery(formattedAddress);
     setDropoffCoords(coords);
     setDropoffSuggestions([]);
     setActiveInput(null);
 
-    // Animate to location
     if (Platform.OS !== "web" && mapRef.current) {
       mapRef.current.animateToRegion({
         ...coords,
@@ -418,13 +435,12 @@ const CreateOnceOffScreen = () => {
     }
   };
 
-  // ✅ Handle map press (tap to set location)
+  // ✅ Handle map press
   const handleMapPress = async (e: any) => {
     if (Platform.OS === "web") return;
 
     const { latitude, longitude } = e.nativeEvent.coordinate;
 
-    // Reverse geocode the tapped location
     const address = await reverseGeocode(
       latitude,
       longitude,
@@ -500,12 +516,14 @@ const CreateOnceOffScreen = () => {
         setDrivers(data.drivers);
         setStep("drivers");
       } else {
-        // Mock drivers for development
         const mockDrivers: Driver[] = [
           {
             _id: "driver1",
             name: "Thabo Molefe",
-            vehicle: "Toyota Corolla - ABC123GP",
+            vehicle: "Toyota Corolla",
+            registrationNumber: "ABC123GP",
+            carBrand: "Toyota",
+            carModel: "Corolla",
             rating: 4.8,
             distance: 1.2,
             latitude: pickupCoords.latitude + 0.005,
@@ -515,7 +533,10 @@ const CreateOnceOffScreen = () => {
           {
             _id: "driver2",
             name: "Nombuso Khumalo",
-            vehicle: "Honda Civic - XYZ789GP",
+            vehicle: "Honda Civic",
+            registrationNumber: "XYZ789GP",
+            carBrand: "Honda",
+            carModel: "Civic",
             rating: 4.9,
             distance: 2.1,
             latitude: pickupCoords.latitude - 0.008,
@@ -525,7 +546,10 @@ const CreateOnceOffScreen = () => {
           {
             _id: "driver3",
             name: "Sipho Dlamini",
-            vehicle: "Nissan Almera - DEF456GP",
+            vehicle: "Nissan Almera",
+            registrationNumber: "DEF456GP",
+            carBrand: "Nissan",
+            carModel: "Almera",
             rating: 4.7,
             distance: 3.5,
             latitude: pickupCoords.latitude + 0.01,
@@ -538,10 +562,7 @@ const CreateOnceOffScreen = () => {
         setStep("drivers");
 
         if (Platform.OS !== "web") {
-          Alert.alert(
-            "Info",
-            "Showing available drivers in your area"
-          );
+          Alert.alert("Info", "Showing available drivers in your area");
         }
       }
     } catch (error) {
@@ -562,7 +583,6 @@ const CreateOnceOffScreen = () => {
     setSelectedDriver(driver);
     setStep("confirm");
 
-    // Zoom to driver location
     if (Platform.OS !== "web" && mapRef.current) {
       mapRef.current.animateToRegion({
         latitude: driver.latitude,
@@ -607,7 +627,7 @@ const CreateOnceOffScreen = () => {
         parentName: tripData?.parentName,
         driverId: selectedDriver._id,
         driverName: selectedDriver.name,
-        driverVehicle: selectedDriver.vehicle,
+        driverVehicle: `${selectedDriver.carBrand} ${selectedDriver.carModel} - ${selectedDriver.registrationNumber}`,
         date: tripData?.date,
         pickupTime: tripData?.pickupTime,
         pickupLocation: {
@@ -628,15 +648,16 @@ const CreateOnceOffScreen = () => {
         activity: tripData?.activity,
         instructions: tripData?.instructions,
         children: tripData?.children,
-        status: "pending", // Driver needs to accept
+        status: "pending",
         fare: calculateFare(),
-        estimatedDuration: Math.ceil(routeData.duration / 60), // minutes
-        estimatedDistance: (routeData.distance / 1000).toFixed(2), // km
+        estimatedDuration: Math.ceil(routeData.duration / 60),
+        estimatedDistance: (routeData.distance / 1000).toFixed(2),
+        createdAt: new Date().toISOString(),
       };
 
       console.log("[Create Trip] Payload:", tripPayload);
 
-      const response = await fetch(`${API_BASE_URL}/api/trips`, {
+      const response = await fetch(`${API_BASE_URL}/api/trips/create`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -649,7 +670,7 @@ const CreateOnceOffScreen = () => {
       console.log("[Create Trip] Response:", result);
 
       if (response.ok && result.success) {
-        const successMessage = `✅ Trip Request Sent!\n\nDriver: ${selectedDriver.name}\nEstimated Fare: R${calculateFare()}\nDistance: ${(routeData.distance / 1000).toFixed(1)} km\nDuration: ${Math.ceil(routeData.duration / 60)} min\n\nThe driver will receive your request and can accept or decline. You'll be notified once they respond.`;
+        const successMessage = `✅ Trip Request Sent!\n\nDriver: ${selectedDriver.name}\nVehicle: ${selectedDriver.carBrand} ${selectedDriver.carModel}\nRegistration: ${selectedDriver.registrationNumber}\nEstimated Fare: R${calculateFare()}\nDistance: ${(routeData.distance / 1000).toFixed(1)} km\nDuration: ${Math.ceil(routeData.duration / 60)} min\n\nThe driver will receive your request and can accept or decline.`;
 
         if (Platform.OS === "web") {
           alert(successMessage);
@@ -685,14 +706,14 @@ const CreateOnceOffScreen = () => {
     }
   };
 
-  // ✅ Calculate fare based on OSM route distance
+  // ✅ Calculate fare
   const calculateFare = () => {
     if (!routeData) return 0;
 
     const distanceKm = routeData.distance / 1000;
     const baseFare = 25;
     const perKm = 12;
-    const timeFactor = Math.ceil(routeData.duration / 60) * 0.5; // R0.50 per minute
+    const timeFactor = Math.ceil(routeData.duration / 60) * 0.5;
 
     return Math.round(baseFare + distanceKm * perKm + timeFactor);
   };
@@ -722,13 +743,13 @@ const CreateOnceOffScreen = () => {
     fetchDrivers();
   };
 
-  // ✅ Format distance for display
+  // ✅ Format distance
   const formatDistance = (meters: number) => {
     const km = meters / 1000;
     return km < 1 ? `${Math.round(meters)} m` : `${km.toFixed(1)} km`;
   };
 
-  // ✅ Format duration for display
+  // ✅ Format duration
   const formatDuration = (seconds: number) => {
     const minutes = Math.ceil(seconds / 60);
     return minutes < 60
@@ -748,7 +769,6 @@ const CreateOnceOffScreen = () => {
         initialRegion={region}
         onPress={handleMapPress}
       >
-        {/* Route Polyline */}
         {routeData && routeData.coordinates.length > 0 && (
           <Polyline
             coordinates={routeData.coordinates}
@@ -757,7 +777,6 @@ const CreateOnceOffScreen = () => {
           />
         )}
 
-        {/* Pickup Marker */}
         <Marker
           coordinate={pickupCoords}
           title="Pickup"
@@ -768,7 +787,6 @@ const CreateOnceOffScreen = () => {
           </View>
         </Marker>
 
-        {/* Dropoff Marker */}
         <Marker
           coordinate={dropoffCoords}
           title="Drop-off"
@@ -779,7 +797,6 @@ const CreateOnceOffScreen = () => {
           </View>
         </Marker>
 
-        {/* Driver Markers */}
         {drivers.map((driver) => (
           <Marker
             key={driver._id}
@@ -788,7 +805,7 @@ const CreateOnceOffScreen = () => {
               longitude: driver.longitude,
             }}
             title={driver.name}
-            description={driver.vehicle}
+            description={`${driver.carBrand} ${driver.carModel} - ${driver.registrationNumber}`}
           >
             <View
               style={[
@@ -808,7 +825,7 @@ const CreateOnceOffScreen = () => {
     );
   };
 
-  // ✅ Render Web Map Placeholder
+  // ✅ Render Web Map
   const renderWebMap = () => {
     if (Platform.OS !== "web") return null;
 
@@ -833,7 +850,7 @@ const CreateOnceOffScreen = () => {
     );
   };
 
-  // ✅ Render location suggestions
+  // ✅ Render suggestions
   const renderSuggestions = (
     suggestions: OSMPlace[],
     loading: boolean,
@@ -852,7 +869,7 @@ const CreateOnceOffScreen = () => {
     if (suggestions.length === 0) return null;
 
     return (
-      <View style={styles.suggestionsContainer}>
+      <ScrollView style={styles.suggestionsContainer} keyboardShouldPersistTaps="handled">
         {suggestions.map((place) => (
           <TouchableOpacity
             key={place.place_id}
@@ -866,18 +883,23 @@ const CreateOnceOffScreen = () => {
             <Ionicons name="location-outline" size={18} color="#666" />
             <View style={styles.suggestionTextContainer}>
               <Text style={styles.suggestionText} numberOfLines={2}>
-                {place.display_name}
+                {formatAddress(place)}
               </Text>
+              {place.address?.city && (
+                <Text style={styles.suggestionSubtext}>
+                  {place.address.city}
+                  {place.address.state && `, ${place.address.state}`}
+                </Text>
+              )}
             </View>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
     );
   };
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
@@ -888,11 +910,9 @@ const CreateOnceOffScreen = () => {
         </View>
       </View>
 
-      {/* Map */}
       {renderNativeMap()}
       {renderWebMap()}
 
-      {/* Route Loading Indicator */}
       {routeLoading && (
         <View style={styles.routeLoadingBanner}>
           <ActivityIndicator size="small" color="#fff" />
@@ -900,7 +920,6 @@ const CreateOnceOffScreen = () => {
         </View>
       )}
 
-      {/* Bottom Sheet */}
       <Animated.View
         style={[
           styles.bottomSheet,
@@ -920,7 +939,6 @@ const CreateOnceOffScreen = () => {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Step Indicator */}
           <View style={styles.stepIndicator}>
             <View
               style={[
@@ -944,17 +962,15 @@ const CreateOnceOffScreen = () => {
             />
           </View>
 
-          {/* Locations Step */}
           {step === "locations" && (
             <View>
               <Text style={styles.sheetTitle}>Set Trip Locations</Text>
               <Text style={styles.sheetSubtext}>
                 {Platform.OS === "web"
-                  ? "Search for addresses or use quick options"
+                  ? "Search for precise addresses or use quick options"
                   : "Search, tap map, or use quick options"}
               </Text>
 
-              {/* Pickup Location */}
               <View style={styles.locationSection}>
                 <View style={styles.locationHeader}>
                   <View style={styles.locationIconCircle}>
@@ -977,7 +993,6 @@ const CreateOnceOffScreen = () => {
                 </TouchableOpacity>
               </View>
 
-              {/* Dropoff Location */}
               <View style={styles.locationSection}>
                 <View style={styles.locationHeader}>
                   <View style={styles.locationIconCircle}>
@@ -1004,7 +1019,6 @@ const CreateOnceOffScreen = () => {
                 </TouchableOpacity>
               </View>
 
-              {/* Route Info */}
               {routeData && (
                 <View style={styles.routeInfoCard}>
                   <Text style={styles.routeInfoTitle}>Trip Overview</Text>
@@ -1029,7 +1043,6 @@ const CreateOnceOffScreen = () => {
                 </View>
               )}
 
-              {/* Trip Details */}
               {tripData && (
                 <View style={styles.tripInfo}>
                   <Text style={styles.tripInfoTitle}>Scheduled Details</Text>
@@ -1058,7 +1071,6 @@ const CreateOnceOffScreen = () => {
                 </View>
               )}
 
-              {/* Continue Button */}
               <TouchableOpacity
                 style={[
                   styles.continueButton,
@@ -1079,7 +1091,6 @@ const CreateOnceOffScreen = () => {
             </View>
           )}
 
-          {/* Drivers Step */}
           {step === "drivers" && (
             <View>
               <Text style={styles.sheetTitle}>Select Driver</Text>
@@ -1100,7 +1111,12 @@ const CreateOnceOffScreen = () => {
                   </View>
                   <View style={styles.driverInfo}>
                     <Text style={styles.driverName}>{driver.name}</Text>
-                    <Text style={styles.driverVehicle}>{driver.vehicle}</Text>
+                    <Text style={styles.driverVehicle}>
+                      {driver.carBrand} {driver.carModel}
+                    </Text>
+                    <Text style={styles.driverRegistration}>
+                      {driver.registrationNumber}
+                    </Text>
                     <View style={styles.driverMeta}>
                       <View style={styles.driverMetaItem}>
                         <Ionicons name="star" size={14} color="#FFB800" />
@@ -1132,7 +1148,6 @@ const CreateOnceOffScreen = () => {
             </View>
           )}
 
-          {/* Confirm Step */}
           {step === "confirm" && selectedDriver && routeData && (
             <View>
               <Text style={styles.sheetTitle}>Confirm Trip Request</Text>
@@ -1140,7 +1155,6 @@ const CreateOnceOffScreen = () => {
                 Driver will be notified and can accept or decline
               </Text>
 
-              {/* Selected Driver */}
               <View style={styles.confirmCard}>
                 <Text style={styles.confirmLabel}>Your Driver</Text>
                 <View style={styles.confirmDriverRow}>
@@ -1152,7 +1166,10 @@ const CreateOnceOffScreen = () => {
                       {selectedDriver.name}
                     </Text>
                     <Text style={styles.confirmDriverVehicle}>
-                      {selectedDriver.vehicle}
+                      {selectedDriver.carBrand} {selectedDriver.carModel}
+                    </Text>
+                    <Text style={styles.confirmDriverRegistration}>
+                      {selectedDriver.registrationNumber}
                     </Text>
                     <View style={styles.confirmDriverRating}>
                       <Ionicons name="star" size={14} color="#FFB800" />
@@ -1165,7 +1182,6 @@ const CreateOnceOffScreen = () => {
                 </View>
               </View>
 
-              {/* Trip Summary */}
               <View style={styles.confirmCard}>
                 <Text style={styles.confirmLabel}>Trip Summary</Text>
                 <View style={styles.confirmRow}>
@@ -1187,7 +1203,6 @@ const CreateOnceOffScreen = () => {
                 </View>
               </View>
 
-              {/* Route Details */}
               <View style={styles.confirmCard}>
                 <Text style={styles.confirmLabel}>Route Details</Text>
                 <View style={styles.confirmRow}>
@@ -1211,7 +1226,6 @@ const CreateOnceOffScreen = () => {
                 </View>
               </View>
 
-              {/* Fare Breakdown */}
               <View style={styles.fareCard}>
                 <View style={styles.fareRow}>
                   <Text style={styles.fareLabel}>Base Fare</Text>
@@ -1240,7 +1254,6 @@ const CreateOnceOffScreen = () => {
                 </View>
               </View>
 
-              {/* Action Buttons */}
               <TouchableOpacity
                 style={[styles.createButton, loading && styles.buttonDisabled]}
                 onPress={handleCreateTrip}
@@ -1532,7 +1545,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#E0E0E0",
-    maxHeight: 200,
+    maxHeight: 250,
     ...Platform.select({
       default: {
         shadowColor: "#000",
@@ -1551,7 +1564,7 @@ const styles = StyleSheet.create({
   suggestionItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: "#F0F0F0",
@@ -1561,9 +1574,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   suggestionText: {
-    fontSize: 13,
+    fontSize: 14,
     color: "#333",
     lineHeight: 18,
+    fontWeight: "500",
+  },
+  suggestionSubtext: {
+    fontSize: 12,
+    color: "#999",
+    marginTop: 2,
   },
   quickButton: {
     flexDirection: "row",
@@ -1691,6 +1710,11 @@ const styles = StyleSheet.create({
   driverVehicle: {
     fontSize: 13,
     color: "#666",
+    marginBottom: 2,
+  },
+  driverRegistration: {
+    fontSize: 12,
+    color: "#999",
     marginBottom: 6,
   },
   driverMeta: {
@@ -1752,6 +1776,11 @@ const styles = StyleSheet.create({
   confirmDriverVehicle: {
     fontSize: 13,
     color: "#666",
+    marginBottom: 2,
+  },
+  confirmDriverRegistration: {
+    fontSize: 12,
+    color: "#999",
     marginBottom: 6,
   },
   confirmDriverRating: {
