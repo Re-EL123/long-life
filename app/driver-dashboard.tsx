@@ -1,4 +1,4 @@
-// DriverDashboard.tsx - Complete with Trip Requests
+// DriverDashboard.tsx - Enhanced with Complete Trip Management
 import {
   View,
   Text,
@@ -46,7 +46,7 @@ interface TripRequest {
   createdAt: string;
 }
 
-interface UpcomingTrip {
+interface Trip {
   _id: string;
   parentName: string;
   pickupLocation: {
@@ -58,23 +58,47 @@ interface UpcomingTrip {
   pickupTime: string;
   date: string;
   fare: number;
+  actualFare?: number;
   status: string;
   timeUntilPickup?: string;
   children: Array<{
     childName: string;
   }>;
+  startedAt?: string;
+  completedAt?: string;
+  estimatedDistance?: string;
+  estimatedDuration?: number;
 }
+
+type TripFilter = 'all' | 'pending' | 'accepted' | 'in-progress' | 'completed' | 'cancelled';
 
 export default function DriverDashboard() {
   const [driverData, setDriverData] = useState<any>(null);
   const [isActive, setIsActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Trip Management State
   const [tripRequests, setTripRequests] = useState<TripRequest[]>([]);
-  const [upcomingTrips, setUpcomingTrips] = useState<UpcomingTrip[]>([]);
+  const [upcomingTrips, setUpcomingTrips] = useState<Trip[]>([]);
+  const [allTrips, setAllTrips] = useState<Trip[]>([]);
+  const [selectedFilter, setSelectedFilter] = useState<TripFilter>('all');
+  const [showTripHistory, setShowTripHistory] = useState(false);
+  
+  // Modal State
   const [selectedRequest, setSelectedRequest] = useState<TripRequest | null>(null);
+  const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [showRequestModal, setShowRequestModal] = useState(false);
+  const [showTripDetailModal, setShowTripDetailModal] = useState(false);
   const [processingRequest, setProcessingRequest] = useState(false);
+
+  // Statistics State
+  const [stats, setStats] = useState({
+    todayTrips: 0,
+    todayEarnings: 0,
+    totalTrips: 0,
+    completionRate: 0,
+  });
 
   useEffect(() => {
     loadDashboard();
@@ -113,7 +137,12 @@ export default function DriverDashboard() {
       setDriverData(data.user);
       setIsActive(!!data.user.isActive);
 
-      await Promise.all([loadTripRequests(), loadUpcomingTrips()]);
+      await Promise.all([
+        loadTripRequests(),
+        loadUpcomingTrips(),
+        loadAllTrips(),
+        loadDriverStats(),
+      ]);
     } catch (error) {
       console.error('Failed to load driver dashboard:', error);
     } finally {
@@ -176,7 +205,7 @@ export default function DriverDashboard() {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        const tripsWithCountdown = (data.trips || []).map((trip: UpcomingTrip) => ({
+        const tripsWithCountdown = (data.trips || []).map((trip: Trip) => ({
           ...trip,
           timeUntilPickup: calculateTimeUntilPickup(trip.date, trip.pickupTime),
         }));
@@ -184,6 +213,76 @@ export default function DriverDashboard() {
       }
     } catch (error) {
       console.error('Failed to load upcoming trips:', error);
+    }
+  };
+
+  const loadAllTrips = async () => {
+    try {
+      const storedToken =
+        (await AsyncStorage.getItem('userToken')) ||
+        (await AsyncStorage.getItem('token'));
+
+      if (!storedToken || !driverData?.id) return;
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/trips?userId=${driverData.id}&role=driver`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${storedToken}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setAllTrips(data.trips || []);
+      }
+    } catch (error) {
+      console.error('Failed to load all trips:', error);
+    }
+  };
+
+  const loadDriverStats = async () => {
+    try {
+      const storedToken =
+        (await AsyncStorage.getItem('userToken')) ||
+        (await AsyncStorage.getItem('token'));
+
+      if (!storedToken || !driverData?.id) return;
+
+      // Calculate today's trips and earnings
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/trips?userId=${driverData.id}&role=driver&startDate=${today.toISOString()}`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${storedToken}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        const trips = data.trips || [];
+        const completedTrips = trips.filter((t: Trip) => t.status === 'completed');
+        
+        setStats({
+          todayTrips: completedTrips.length,
+          todayEarnings: completedTrips.reduce((sum: number, t: Trip) => sum + (t.actualFare || t.fare), 0),
+          totalTrips: trips.length,
+          completionRate: trips.length > 0 ? (completedTrips.length / trips.length) * 100 : 0,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to load driver stats:', error);
     }
   };
 
@@ -234,7 +333,7 @@ export default function DriverDashboard() {
 
       if (response.ok && data.success) {
         setShowRequestModal(false);
-        await Promise.all([loadTripRequests(), loadUpcomingTrips()]);
+        await Promise.all([loadTripRequests(), loadUpcomingTrips(), loadAllTrips()]);
         alert('Trip accepted! Added to your upcoming trips.');
       } else {
         alert(data.message || 'Failed to accept trip');
@@ -271,7 +370,7 @@ export default function DriverDashboard() {
 
       if (response.ok && data.success) {
         setShowRequestModal(false);
-        await loadTripRequests();
+        await Promise.all([loadTripRequests(), loadAllTrips()]);
       } else {
         alert(data.message || 'Failed to decline trip');
       }
@@ -310,6 +409,71 @@ export default function DriverDashboard() {
     } catch (error) {
       console.error('Failed to start trip:', error);
       alert('Network error. Please try again.');
+    }
+  };
+
+  const handleCompleteTrip = async (tripId: string) => {
+    try {
+      const storedToken =
+        (await AsyncStorage.getItem('userToken')) ||
+        (await AsyncStorage.getItem('token'));
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/trips/${tripId}/complete`,
+        {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${storedToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            actualFare: selectedTrip?.fare,
+            notes: 'Trip completed successfully',
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setShowTripDetailModal(false);
+        await Promise.all([loadUpcomingTrips(), loadAllTrips(), loadDriverStats()]);
+        alert('Trip completed successfully!');
+      } else {
+        alert(data.message || 'Failed to complete trip');
+      }
+    } catch (error) {
+      console.error('Failed to complete trip:', error);
+      alert('Network error. Please try again.');
+    }
+  };
+
+  const getFilteredTrips = () => {
+    if (selectedFilter === 'all') return allTrips;
+    return allTrips.filter(trip => trip.status === selectedFilter);
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'pending': return '#FF9800';
+      case 'accepted': return '#2196F3';
+      case 'in-progress': return '#9C27B0';
+      case 'completed': return '#4CAF50';
+      case 'cancelled': return '#F44336';
+      case 'declined': return '#757575';
+      default: return '#666';
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'pending': return 'time-outline';
+      case 'accepted': return 'checkmark-circle-outline';
+      case 'in-progress': return 'car-outline';
+      case 'completed': return 'checkmark-done-circle';
+      case 'cancelled': return 'close-circle-outline';
+      case 'declined': return 'remove-circle-outline';
+      default: return 'help-circle-outline';
     }
   };
 
@@ -415,6 +579,7 @@ export default function DriverDashboard() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
+        {/* Status Card */}
         <Text style={styles.subheading}>Status</Text>
         <View style={styles.statusCard}>
           <Text
@@ -428,6 +593,21 @@ export default function DriverDashboard() {
           </Text>
         </View>
 
+        {/* Statistics Cards */}
+        <View style={styles.statsContainer}>
+          <View style={styles.statCard}>
+            <Ionicons name="car-outline" size={24} color="#5A0FC8" />
+            <Text style={styles.statValue}>{stats.todayTrips}</Text>
+            <Text style={styles.statLabel}>Today's Trips</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Ionicons name="cash-outline" size={24} color="#00C853" />
+            <Text style={styles.statValue}>R{stats.todayEarnings}</Text>
+            <Text style={styles.statLabel}>Today's Earnings</Text>
+          </View>
+        </View>
+
+        {/* Trip Requests Section */}
         {tripRequests.length > 0 && (
           <View style={styles.requestsSection}>
             <Text style={styles.subheading}>
@@ -468,13 +648,21 @@ export default function DriverDashboard() {
           </View>
         )}
 
+        {/* Upcoming Trips Section */}
         {upcomingTrips.length > 0 && (
           <View style={styles.upcomingSection}>
             <Text style={styles.subheading}>
               Upcoming Trips ({upcomingTrips.length})
             </Text>
             {upcomingTrips.map((trip) => (
-              <View key={trip._id} style={styles.upcomingCard}>
+              <TouchableOpacity
+                key={trip._id}
+                style={styles.upcomingCard}
+                onPress={() => {
+                  setSelectedTrip(trip);
+                  setShowTripDetailModal(true);
+                }}
+              >
                 <View style={styles.upcomingHeader}>
                   <View>
                     <Text style={styles.upcomingParent}>{trip.parentName}</Text>
@@ -508,27 +696,132 @@ export default function DriverDashboard() {
                   <Text style={styles.upcomingFare}>R{trip.fare}</Text>
                   <TouchableOpacity
                     style={styles.startButton}
-                    onPress={() => handleStartTrip(trip._id)}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleStartTrip(trip._id);
+                    }}
                   >
                     <Text style={styles.startButtonText}>Start Trip</Text>
                     <Ionicons name="arrow-forward" size={16} color="#fff" />
                   </TouchableOpacity>
                 </View>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         )}
 
+        {/* Trip History Section */}
+        <View style={styles.historySection}>
+          <View style={styles.historyHeader}>
+            <Text style={styles.subheading}>Trip Management</Text>
+            <TouchableOpacity
+              onPress={() => setShowTripHistory(!showTripHistory)}
+              style={styles.toggleButton}
+            >
+              <Text style={styles.toggleButtonText}>
+                {showTripHistory ? 'Hide' : 'Show'} All Trips
+              </Text>
+              <Ionicons
+                name={showTripHistory ? 'chevron-up' : 'chevron-down'}
+                size={20}
+                color="#5A0FC8"
+              />
+            </TouchableOpacity>
+          </View>
+
+          {showTripHistory && (
+            <>
+              {/* Filter Buttons */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.filterContainer}
+              >
+                {(['all', 'pending', 'accepted', 'in-progress', 'completed', 'cancelled'] as TripFilter[]).map((filter) => (
+                  <TouchableOpacity
+                    key={filter}
+                    style={[
+                      styles.filterButton,
+                      selectedFilter === filter && styles.filterButtonActive,
+                    ]}
+                    onPress={() => setSelectedFilter(filter)}
+                  >
+                    <Text
+                      style={[
+                        styles.filterButtonText,
+                        selectedFilter === filter && styles.filterButtonTextActive,
+                      ]}
+                    >
+                      {filter.charAt(0).toUpperCase() + filter.slice(1).replace('-', ' ')}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Trip List */}
+              {getFilteredTrips().length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Ionicons name="car-outline" size={48} color="#CCC" />
+                  <Text style={styles.emptyStateText}>
+                    No {selectedFilter !== 'all' ? selectedFilter : ''} trips found
+                  </Text>
+                </View>
+              ) : (
+                getFilteredTrips().map((trip) => (
+                  <TouchableOpacity
+                    key={trip._id}
+                    style={styles.historyCard}
+                    onPress={() => {
+                      setSelectedTrip(trip);
+                      setShowTripDetailModal(true);
+                    }}
+                  >
+                    <View style={styles.historyHeader}>
+                      <View>
+                        <Text style={styles.historyParent}>{trip.parentName}</Text>
+                        <Text style={styles.historyDate}>
+                          {new Date(trip.date).toLocaleDateString('en-ZA')}
+                        </Text>
+                      </View>
+                      <View style={[styles.statusBadge, { backgroundColor: getStatusColor(trip.status) + '20' }]}>
+                        <Ionicons
+                          name={getStatusIcon(trip.status) as any}
+                          size={16}
+                          color={getStatusColor(trip.status)}
+                        />
+                        <Text style={[styles.statusText, { color: getStatusColor(trip.status) }]}>
+                          {trip.status.charAt(0).toUpperCase() + trip.status.slice(1).replace('-', ' ')}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.historyMeta}>
+                      <Text style={styles.historyMetaText}>
+                        R{trip.actualFare || trip.fare}
+                      </Text>
+                      <Text style={styles.historyMetaText}>•</Text>
+                      <Text style={styles.historyMetaText}>
+                        {trip.estimatedDistance || '—'} km
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))
+              )}
+            </>
+          )}
+        </View>
+
+        {/* Earnings Today */}
         <Text style={styles.subheading}>Earnings Today</Text>
         <LinearGradient
           colors={['#5A0FC8', '#5A0FC8']}
           style={styles.earningCard}
         >
           <Text style={styles.earningAmountWhite}>
-            R{driverData?.totalEarnings ?? 0}
+            R{stats.todayEarnings}
           </Text>
         </LinearGradient>
 
+        {/* Feature Buttons */}
         <View style={styles.buttonRow}>
           <LinearGradient
             colors={['#5A0FC8', '#5A0FC8']}
@@ -551,6 +844,7 @@ export default function DriverDashboard() {
           </LinearGradient>
         </View>
 
+        {/* Bottom Buttons */}
         <View style={styles.bottomRow}>
           <TouchableOpacity style={styles.emergencyButton}>
             <Text style={styles.emergencyText}>Emergency SOS</Text>
@@ -565,6 +859,7 @@ export default function DriverDashboard() {
         </View>
       </ScrollView>
 
+      {/* Trip Request Modal */}
       <Modal
         visible={showRequestModal}
         animationType="slide"
@@ -685,6 +980,110 @@ export default function DriverDashboard() {
           </View>
         </View>
       </Modal>
+
+      {/* Trip Detail Modal */}
+      <Modal
+        visible={showTripDetailModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowTripDetailModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Trip Details</Text>
+              <TouchableOpacity
+                onPress={() => setShowTripDetailModal(false)}
+                style={styles.modalClose}
+              >
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedTrip && (
+              <ScrollView style={styles.modalBody}>
+                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(selectedTrip.status) + '20', alignSelf: 'flex-start', marginBottom: 20 }]}>
+                  <Ionicons
+                    name={getStatusIcon(selectedTrip.status) as any}
+                    size={18}
+                    color={getStatusColor(selectedTrip.status)}
+                  />
+                  <Text style={[styles.statusText, { color: getStatusColor(selectedTrip.status), fontSize: 16 }]}>
+                    {selectedTrip.status.charAt(0).toUpperCase() + selectedTrip.status.slice(1).replace('-', ' ')}
+                  </Text>
+                </View>
+
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalLabel}>Parent</Text>
+                  <Text style={styles.modalValue}>{selectedTrip.parentName}</Text>
+                </View>
+
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalLabel}>Pickup</Text>
+                  <View style={styles.modalLocationRow}>
+                    <Ionicons name="radio-button-on" size={16} color="#00C853" />
+                    <Text style={styles.modalLocationText}>
+                      {selectedTrip.pickupLocation.address}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalLabel}>Drop-off</Text>
+                  <View style={styles.modalLocationRow}>
+                    <Ionicons name="location" size={16} color="#FF5252" />
+                    <Text style={styles.modalLocationText}>
+                      {selectedTrip.dropoffLocation.address}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalLabel}>Trip Details</Text>
+                  <View style={styles.modalDetailRow}>
+                    <Ionicons name="calendar-outline" size={16} color="#666" />
+                    <Text style={styles.modalDetailText}>
+                      {new Date(selectedTrip.date).toLocaleDateString('en-ZA')}
+                    </Text>
+                  </View>
+                  <View style={styles.modalDetailRow}>
+                    <Ionicons name="time-outline" size={16} color="#666" />
+                    <Text style={styles.modalDetailText}>
+                      {selectedTrip.pickupTime}
+                    </Text>
+                  </View>
+                  {selectedTrip.estimatedDistance && (
+                    <View style={styles.modalDetailRow}>
+                      <Ionicons name="navigate-outline" size={16} color="#666" />
+                      <Text style={styles.modalDetailText}>
+                        {selectedTrip.estimatedDistance} km
+                        {selectedTrip.estimatedDuration && ` • ${selectedTrip.estimatedDuration} min`}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.modalFareSection}>
+                  <Text style={styles.modalFareLabel}>Trip Fare</Text>
+                  <Text style={styles.modalFareValue}>
+                    R{selectedTrip.actualFare || selectedTrip.fare}
+                  </Text>
+                </View>
+
+                {selectedTrip.status === 'in-progress' && (
+                  <TouchableOpacity
+                    style={styles.completeButton}
+                    onPress={() => handleCompleteTrip(selectedTrip._id)}
+                  >
+                    <Ionicons name="checkmark-done-circle" size={20} color="#fff" />
+                    <Text style={styles.completeButtonText}>Complete Trip</Text>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -742,6 +1141,36 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 10,
     marginBottom: 20,
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  statCard: {
+    flex: 1,
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginHorizontal: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  statValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333',
+    marginTop: 8,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 4,
+    textAlign: 'center',
   },
   requestsSection: {
     marginBottom: 20,
@@ -872,6 +1301,101 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
     fontSize: 14,
+  },
+  historySection: {
+    marginBottom: 20,
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  toggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  toggleButtonText: {
+    color: '#5A0FC8',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  filterContainer: {
+    marginBottom: 16,
+  },
+  filterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#F0F0F0',
+    marginRight: 8,
+  },
+  filterButtonActive: {
+    backgroundColor: '#5A0FC8',
+  },
+  filterButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#666',
+  },
+  filterButtonTextActive: {
+    color: '#fff',
+  },
+  historyCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  historyParent: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#333',
+  },
+  historyDate: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 2,
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  historyMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  historyMetaText: {
+    fontSize: 13,
+    color: '#666',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 12,
   },
   earningCard: {
     padding: 16,
@@ -1044,6 +1568,21 @@ const styles = StyleSheet.create({
   acceptButtonText: {
     fontSize: 16,
     fontWeight: '600',
+    color: '#fff',
+  },
+  completeButton: {
+    backgroundColor: '#4CAF50',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    borderRadius: 12,
+    marginTop: 20,
+  },
+  completeButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
     color: '#fff',
   },
 });
