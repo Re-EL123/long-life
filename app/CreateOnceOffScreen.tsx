@@ -499,7 +499,7 @@ const CreateOnceOffScreen = () => {
         (await AsyncStorage.getItem("token"));
 
       const response = await fetch(
-        `${API_BASE_URL}/api/drivers/available?lat=${pickupCoords.latitude}&lng=${pickupCoords.longitude}`,
+        `${API_BASE_URL}/api/user/drivers/available?lat=${pickupCoords.latitude}&lng=${pickupCoords.longitude}`,
         {
           method: "GET",
           headers: {
