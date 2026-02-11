@@ -129,13 +129,26 @@ export default function DriverDashboard() {
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        console.error('Profile fetch failed:', data);
+        console.error('[Driver Dashboard] Profile fetch failed:', data);
         setLoading(false);
         return;
       }
 
-      setDriverData(data.user);
-      setIsActive(!!data.user.isActive);
+      // Ensure user object has _id field
+      const userData = {
+        ...data.user,
+        _id: data.user._id || data.user.id, // Fallback to id if _id doesn't exist
+      };
+
+      console.log('[Driver Dashboard] Profile loaded:', {
+        userId: userData._id,
+        name: userData.name,
+        role: userData.role,
+        isActive: userData.isActive,
+      });
+
+      setDriverData(userData);
+      setIsActive(!!userData.isActive);
 
       await Promise.all([
         loadTripRequests(),
@@ -156,10 +169,18 @@ export default function DriverDashboard() {
         (await AsyncStorage.getItem('userToken')) ||
         (await AsyncStorage.getItem('token'));
 
-      if (!storedToken || !driverData?.id) return;
+      if (!storedToken || !driverData?._id) {
+        console.log('[Load Trip Requests] Missing token or driver ID:', {
+          hasToken: !!storedToken,
+          driverId: driverData?._id,
+        });
+        return;
+      }
+
+      console.log('[Load Trip Requests] Fetching requests for driver:', driverData._id);
 
       const response = await fetch(
-        `${API_BASE_URL}/api/trips/requests/${driverData.id}`,
+        `${API_BASE_URL}/api/trips/requests/${driverData._id}`,
         {
           method: 'GET',
           headers: {
@@ -170,16 +191,24 @@ export default function DriverDashboard() {
       );
 
       const data = await response.json();
+      console.log('[Load Trip Requests] Response:', {
+        ok: response.ok,
+        success: data.success,
+        requestCount: data.requests?.length || 0,
+      });
 
       if (response.ok && data.success) {
         setTripRequests(data.requests || []);
+        console.log(`[Load Trip Requests] Loaded ${data.requests?.length || 0} pending requests`);
         if (data.requests && data.requests.length > 0 && !showRequestModal) {
           setSelectedRequest(data.requests[0]);
           setShowRequestModal(true);
         }
+      } else {
+        console.error('[Load Trip Requests] Failed:', data);
       }
     } catch (error) {
-      console.error('Failed to load trip requests:', error);
+      console.error('[Load Trip Requests] Error:', error);
     }
   };
 
@@ -189,10 +218,15 @@ export default function DriverDashboard() {
         (await AsyncStorage.getItem('userToken')) ||
         (await AsyncStorage.getItem('token'));
 
-      if (!storedToken || !driverData?.id) return;
+      if (!storedToken || !driverData?._id) {
+        console.log('[Load Upcoming Trips] Missing token or driver ID');
+        return;
+      }
+
+      console.log('[Load Upcoming Trips] Fetching for driver:', driverData._id);
 
       const response = await fetch(
-        `${API_BASE_URL}/api/trips/upcoming/${driverData.id}`,
+        `${API_BASE_URL}/api/trips/upcoming/${driverData._id}`,
         {
           method: 'GET',
           headers: {
@@ -203,6 +237,11 @@ export default function DriverDashboard() {
       );
 
       const data = await response.json();
+      console.log('[Load Upcoming Trips] Response:', {
+        ok: response.ok,
+        success: data.success,
+        tripCount: data.trips?.length || 0,
+      });
 
       if (response.ok && data.success) {
         const tripsWithCountdown = (data.trips || []).map((trip: Trip) => ({
@@ -210,9 +249,12 @@ export default function DriverDashboard() {
           timeUntilPickup: calculateTimeUntilPickup(trip.date, trip.pickupTime),
         }));
         setUpcomingTrips(tripsWithCountdown);
+        console.log(`[Load Upcoming Trips] Loaded ${tripsWithCountdown.length} upcoming trips`);
+      } else {
+        console.error('[Load Upcoming Trips] Failed:', data);
       }
     } catch (error) {
-      console.error('Failed to load upcoming trips:', error);
+      console.error('[Load Upcoming Trips] Error:', error);
     }
   };
 
@@ -222,10 +264,15 @@ export default function DriverDashboard() {
         (await AsyncStorage.getItem('userToken')) ||
         (await AsyncStorage.getItem('token'));
 
-      if (!storedToken || !driverData?.id) return;
+      if (!storedToken || !driverData?._id) {
+        console.log('[Load All Trips] Missing token or driver ID');
+        return;
+      }
+
+      console.log('[Load All Trips] Fetching for driver:', driverData._id);
 
       const response = await fetch(
-        `${API_BASE_URL}/api/trips?userId=${driverData.id}&role=driver`,
+        `${API_BASE_URL}/api/trips?userId=${driverData._id}&role=driver`,
         {
           method: 'GET',
           headers: {
@@ -236,12 +283,20 @@ export default function DriverDashboard() {
       );
 
       const data = await response.json();
+      console.log('[Load All Trips] Response:', {
+        ok: response.ok,
+        success: data.success,
+        tripCount: data.trips?.length || 0,
+      });
 
       if (response.ok && data.success) {
         setAllTrips(data.trips || []);
+        console.log(`[Load All Trips] Loaded ${data.trips?.length || 0} trips`);
+      } else {
+        console.error('[Load All Trips] Failed:', data);
       }
     } catch (error) {
-      console.error('Failed to load all trips:', error);
+      console.error('[Load All Trips] Error:', error);
     }
   };
 
@@ -251,14 +306,19 @@ export default function DriverDashboard() {
         (await AsyncStorage.getItem('userToken')) ||
         (await AsyncStorage.getItem('token'));
 
-      if (!storedToken || !driverData?.id) return;
+      if (!storedToken || !driverData?._id) {
+        console.log('[Load Driver Stats] Missing token or driver ID');
+        return;
+      }
 
       // Calculate today's trips and earnings
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
+      console.log('[Load Driver Stats] Fetching stats for driver:', driverData._id);
+
       const response = await fetch(
-        `${API_BASE_URL}/api/trips?userId=${driverData.id}&role=driver&startDate=${today.toISOString()}`,
+        `${API_BASE_URL}/api/trips?userId=${driverData._id}&role=driver&startDate=${today.toISOString()}`,
         {
           method: 'GET',
           headers: {
@@ -269,20 +329,30 @@ export default function DriverDashboard() {
       );
 
       const data = await response.json();
+      console.log('[Load Driver Stats] Response:', {
+        ok: response.ok,
+        success: data.success,
+        tripCount: data.trips?.length || 0,
+      });
 
       if (response.ok && data.success) {
         const trips = data.trips || [];
         const completedTrips = trips.filter((t: Trip) => t.status === 'completed');
         
-        setStats({
+        const statsData = {
           todayTrips: completedTrips.length,
           todayEarnings: completedTrips.reduce((sum: number, t: Trip) => sum + (t.actualFare || t.fare), 0),
           totalTrips: trips.length,
           completionRate: trips.length > 0 ? (completedTrips.length / trips.length) * 100 : 0,
-        });
+        };
+        
+        setStats(statsData);
+        console.log('[Load Driver Stats] Stats:', statsData);
+      } else {
+        console.error('[Load Driver Stats] Failed:', data);
       }
     } catch (error) {
-      console.error('Failed to load driver stats:', error);
+      console.error('[Load Driver Stats] Error:', error);
     }
   };
 
@@ -490,9 +560,13 @@ export default function DriverDashboard() {
         (await AsyncStorage.getItem('userToken')) ||
         (await AsyncStorage.getItem('token'));
 
-      if (!storedToken || !driverData?.id) {
+      if (!storedToken || !driverData?._id) {
+        console.log('[Toggle Active] Missing token or driver ID');
+        setIsActive(!value);
         return;
       }
+
+      console.log('[Toggle Active] Setting driver active status to:', value);
 
       const response = await fetch(`${API_BASE_URL}/api/user/profile`, {
         method: 'PUT',
@@ -504,9 +578,14 @@ export default function DriverDashboard() {
       });
 
       const data = await response.json();
+      console.log('[Toggle Active] Response:', {
+        ok: response.ok,
+        success: data.success,
+        isActive: data.user?.isActive,
+      });
 
       if (!response.ok || !data.success) {
-        console.error('Toggle active failed:', data);
+        console.error('[Toggle Active] Failed:', data);
         setIsActive(!value);
         return;
       }
@@ -514,8 +593,9 @@ export default function DriverDashboard() {
       setDriverData((prev: any) =>
         prev ? { ...prev, isActive: data.user.isActive } : prev
       );
+      console.log('[Toggle Active] Successfully updated to:', data.user.isActive);
     } catch (error) {
-      console.error('Failed to toggle active status:', error);
+      console.error('[Toggle Active] Error:', error);
       setIsActive(!value);
     }
   };

@@ -1,4 +1,7 @@
 // CreateOnceOffScreen.tsx - Production OSM-Powered Trip Creation
+// Uses: SafeMap (FREE OSM), GeocodingService (Photon+Nominatim), RoutingService (OSRM+Valhalla)
+// All services are 100% FREE - no API keys required
+
 import React, { useState, useEffect, useRef } from "react";
 import {
   View,
@@ -15,38 +18,23 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { MapView, Marker, Polyline, PROVIDER_GOOGLE } from "./MapComponent";
 
-// ✅ API URLs
+// OLD: import { MapView, Marker, Polyline, PROVIDER_GOOGLE } from "./MapComponent";
+// NEW:
+import SafeMap, {
+  SafeMapMarker,
+  SafeMapRoute,
+  Coordinate,
+  MapRegion,
+} from "./MapComponent";
+import geocoding, { GeoResult } from "../services/geocoding";
+import routing, { RouteResult } from "../services/routing";
+import fareCalculator, { FareBreakdown } from "../services/fareCalculator";
+
+// ✅ API URL
 const API_BASE_URL = "https://safe-school-ride.duckdns.org";
 
-// ✅ OpenStreetMap Services
-const NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org";
-const OSRM_BASE_URL = "https://router.project-osrm.org";
-
 // ✅ Interfaces
-interface OSMPlace {
-  place_id: string;
-  display_name: string;
-  lat: string;
-  lon: string;
-  address?: {
-    road?: string;
-    suburb?: string;
-    city?: string;
-    state?: string;
-    postcode?: string;
-    country?: string;
-    house_number?: string;
-  };
-}
-
-interface RouteData {
-  distance: number;
-  duration: number;
-  coordinates: Array<{ latitude: number; longitude: number }>;
-}
-
 interface Driver {
   _id: string;
   name: string;
@@ -86,7 +74,7 @@ const CreateOnceOffScreen = () => {
   const [tripData, setTripData] = useState<TripData | null>(null);
 
   // Map state
-  const [region, setRegion] = useState({
+  const [region, setRegion] = useState<MapRegion>({
     latitude: -26.0667,
     longitude: 28.0667,
     latitudeDelta: 0.05,
@@ -96,27 +84,32 @@ const CreateOnceOffScreen = () => {
   // Location state
   const [pickupLocation, setPickupLocation] = useState("");
   const [dropoffLocation, setDropoffLocation] = useState("");
-  const [pickupCoords, setPickupCoords] = useState({
+  const [pickupCoords, setPickupCoords] = useState<Coordinate>({
     latitude: -26.0667,
     longitude: 28.0667,
   });
-  const [dropoffCoords, setDropoffCoords] = useState({
+  const [dropoffCoords, setDropoffCoords] = useState<Coordinate>({
     latitude: -26.0833,
     longitude: 28.0833,
   });
 
-  // ✅ OSM Search State
+  // ✅ Search State (using GeocodingService)
   const [pickupQuery, setPickupQuery] = useState("");
   const [dropoffQuery, setDropoffQuery] = useState("");
-  const [pickupSuggestions, setPickupSuggestions] = useState<OSMPlace[]>([]);
-  const [dropoffSuggestions, setDropoffSuggestions] = useState<OSMPlace[]>([]);
+  const [pickupSuggestions, setPickupSuggestions] = useState<GeoResult[]>([]);
+  const [dropoffSuggestions, setDropoffSuggestions] = useState<GeoResult[]>([]);
   const [pickupSearchLoading, setPickupSearchLoading] = useState(false);
   const [dropoffSearchLoading, setDropoffSearchLoading] = useState(false);
-  const [activeInput, setActiveInput] = useState<"pickup" | "dropoff" | null>(null);
+  const [activeInput, setActiveInput] = useState<"pickup" | "dropoff" | null>(
+    null
+  );
 
-  // ✅ Route State
-  const [routeData, setRouteData] = useState<RouteData | null>(null);
+  // ✅ Route State (using RoutingService)
+  const [routeData, setRouteData] = useState<RouteResult | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
+
+  // ✅ Fare State (using FareCalculator)
+  const [fareData, setFareData] = useState<FareBreakdown | null>(null);
 
   // Drivers state
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -125,7 +118,9 @@ const CreateOnceOffScreen = () => {
 
   // UI state
   const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState<"locations" | "drivers" | "confirm">("locations");
+  const [step, setStep] = useState<"locations" | "drivers" | "confirm">(
+    "locations"
+  );
 
   const mapRef = useRef<any>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -146,12 +141,13 @@ const CreateOnceOffScreen = () => {
           setDropoffLocation(child.schoolAddress);
           setDropoffQuery(child.schoolAddress);
 
-          geocodeAddress(child.homeAddress, "pickup");
-          geocodeAddress(child.schoolAddress, "dropoff");
+          // Geocode addresses using the service
+          handleGeocodeAddress(child.homeAddress, "pickup");
+          handleGeocodeAddress(child.schoolAddress, "dropoff");
         }
       } catch (error) {
         console.error("[CreateOnceOff] Error parsing trip data:", error);
-        Alert.alert("Error", "Invalid trip data");
+        showAlert("Error", "Invalid trip data");
         router.back();
       }
     }
@@ -167,15 +163,43 @@ const CreateOnceOffScreen = () => {
     }).start();
   }, []);
 
-  // ✅ Calculate route when both locations are set
+  // ✅ Calculate route when both locations change
   useEffect(() => {
     if (pickupCoords && dropoffCoords) {
-      calculateRoute();
+      handleCalculateRoute();
     }
   }, [pickupCoords, dropoffCoords]);
 
-  // ✅ OSM Nominatim Search with precise results
-  const searchOSMPlaces = async (query: string, type: "pickup" | "dropoff") => {
+  // ✅ Recalculate fare when route changes
+  useEffect(() => {
+    if (routeData && tripData) {
+      const fare = fareCalculator.calculate(
+        routeData.distance,
+        routeData.duration,
+        tripData.children?.length || 1
+      );
+      setFareData(fare);
+    }
+  }, [routeData, tripData]);
+
+  // ✅ Cross-platform alert helper
+  const showAlert = (title: string, message: string, buttons?: any[]) => {
+    if (Platform.OS === "web") {
+      alert(`${title}\n\n${message}`);
+      // Execute first button's onPress if exists
+      if (buttons && buttons.length > 0 && buttons[0].onPress) {
+        buttons[0].onPress();
+      }
+    } else {
+      Alert.alert(title, message, buttons);
+    }
+  };
+
+  // ✅ Search places using GeocodingService (Photon + Nominatim)
+  const handleSearchPlaces = async (
+    query: string,
+    type: "pickup" | "dropoff"
+  ) => {
     if (!query || query.trim().length < 3) {
       if (type === "pickup") setPickupSuggestions([]);
       else setDropoffSuggestions([]);
@@ -186,31 +210,19 @@ const CreateOnceOffScreen = () => {
       if (type === "pickup") setPickupSearchLoading(true);
       else setDropoffSearchLoading(true);
 
-      const response = await fetch(
-        `${NOMINATIM_BASE_URL}/search?` +
-          new URLSearchParams({
-            q: query,
-            format: "json",
-            addressdetails: "1",
-            limit: "8",
-            countrycodes: "za",
-            "accept-language": "en",
-            dedupe: "1",
-          }),
-        {
-          headers: {
-            "User-Agent": "SafeSchoolRide/1.0",
-          },
-        }
-      );
+      const results = await geocoding.search(query, {
+        country: "za",
+        limit: 8,
+        near: { lat: region.latitude, lng: region.longitude },
+        language: "en",
+      });
 
-      const data: OSMPlace[] = await response.json();
-      console.log(`[OSM Search ${type}]:`, data);
+      console.log(`[Search ${type}]:`, results.length, "results");
 
-      if (type === "pickup") setPickupSuggestions(data);
-      else setDropoffSuggestions(data);
+      if (type === "pickup") setPickupSuggestions(results);
+      else setDropoffSuggestions(results);
     } catch (error) {
-      console.error(`[OSM Search ${type}] Error:`, error);
+      console.error(`[Search ${type}] Error:`, error);
       if (type === "pickup") setPickupSuggestions([]);
       else setDropoffSuggestions([]);
     } finally {
@@ -219,32 +231,15 @@ const CreateOnceOffScreen = () => {
     }
   };
 
-  // ✅ Geocode address
-  const geocodeAddress = async (address: string, type: "pickup" | "dropoff") => {
+  // ✅ Geocode a single address using GeocodingService
+  const handleGeocodeAddress = async (
+    address: string,
+    type: "pickup" | "dropoff"
+  ) => {
     try {
-      const response = await fetch(
-        `${NOMINATIM_BASE_URL}/search?` +
-          new URLSearchParams({
-            q: address,
-            format: "json",
-            limit: "1",
-            countrycodes: "za",
-            addressdetails: "1",
-          }),
-        {
-          headers: {
-            "User-Agent": "SafeSchoolRide/1.0",
-          },
-        }
-      );
+      const coords = await geocoding.geocodeAddress(address, "za");
 
-      const data: OSMPlace[] = await response.json();
-      if (data.length > 0) {
-        const coords = {
-          latitude: parseFloat(data[0].lat),
-          longitude: parseFloat(data[0].lon),
-        };
-
+      if (coords) {
         if (type === "pickup") {
           setPickupCoords(coords);
           setRegion({
@@ -255,96 +250,98 @@ const CreateOnceOffScreen = () => {
         } else {
           setDropoffCoords(coords);
         }
+        console.log(`[Geocode ${type}]:`, coords);
+      } else {
+        console.warn(`[Geocode ${type}] No results for:`, address);
       }
     } catch (error) {
       console.error(`[Geocode ${type}] Error:`, error);
     }
   };
 
-  // ✅ Reverse Geocode
-  const reverseGeocode = async (
+  // ✅ Reverse geocode using GeocodingService
+  const handleReverseGeocode = async (
     latitude: number,
     longitude: number,
     type: "pickup" | "dropoff"
-  ) => {
+  ): Promise<string> => {
     try {
-      const response = await fetch(
-        `${NOMINATIM_BASE_URL}/reverse?` +
-          new URLSearchParams({
-            lat: latitude.toString(),
-            lon: longitude.toString(),
-            format: "json",
-            addressdetails: "1",
-          }),
-        {
-          headers: {
-            "User-Agent": "SafeSchoolRide/1.0",
-          },
+      const result = await geocoding.reverseGeocode(latitude, longitude);
+
+      if (result) {
+        const address = result.shortAddress || result.address;
+
+        if (type === "pickup") {
+          setPickupLocation(address);
+          setPickupQuery(address);
+        } else {
+          setDropoffLocation(address);
+          setDropoffQuery(address);
         }
-      );
 
-      const data: OSMPlace = await response.json();
-      const address = data.display_name;
-
-      if (type === "pickup") {
-        setPickupLocation(address);
-        setPickupQuery(address);
-      } else {
-        setDropoffLocation(address);
-        setDropoffQuery(address);
+        return address;
       }
 
-      return address;
+      const fallback = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+      if (type === "pickup") {
+        setPickupLocation(fallback);
+        setPickupQuery(fallback);
+      } else {
+        setDropoffLocation(fallback);
+        setDropoffQuery(fallback);
+      }
+      return fallback;
     } catch (error) {
-      console.error(`[Reverse Geocode ${type}] Error:`, error);
-      return `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+      console.error(`[ReverseGeocode ${type}] Error:`, error);
+      const fallback = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+      if (type === "pickup") {
+        setPickupLocation(fallback);
+        setPickupQuery(fallback);
+      } else {
+        setDropoffLocation(fallback);
+        setDropoffQuery(fallback);
+      }
+      return fallback;
     }
   };
 
-  // ✅ Calculate Route using OSRM
-  const calculateRoute = async () => {
+  // ✅ Calculate route using RoutingService (OSRM + Valhalla)
+  const handleCalculateRoute = async () => {
     if (!pickupCoords || !dropoffCoords) return;
+
+    // Avoid recalculating if coords haven't meaningfully changed
+    const isSameLocation =
+      Math.abs(pickupCoords.latitude - dropoffCoords.latitude) < 0.0001 &&
+      Math.abs(pickupCoords.longitude - dropoffCoords.longitude) < 0.0001;
+
+    if (isSameLocation) return;
 
     setRouteLoading(true);
     try {
-      const coords = `${pickupCoords.longitude},${pickupCoords.latitude};${dropoffCoords.longitude},${dropoffCoords.latitude}`;
-      const response = await fetch(
-        `${OSRM_BASE_URL}/route/v1/driving/${coords}?overview=full&geometries=geojson`
-      );
+      const result = await routing.getRoute(pickupCoords, dropoffCoords, {
+        profile: "driving",
+        steps: true,
+      });
 
-      const data = await response.json();
-      console.log("[OSRM Route]:", data);
-
-      if (data.code === "Ok" && data.routes && data.routes.length > 0) {
-        const route = data.routes[0];
-        const coordinates = route.geometry.coordinates.map(
-          (coord: [number, number]) => ({
-            latitude: coord[1],
-            longitude: coord[0],
-          })
+      if (result) {
+        setRouteData(result);
+        console.log(
+          "[Route] Distance:",
+          formatDistance(result.distance),
+          "Duration:",
+          formatDuration(result.duration)
         );
-
-        setRouteData({
-          distance: route.distance,
-          duration: route.duration,
-          coordinates,
-        });
-
-        if (Platform.OS !== "web" && mapRef.current) {
-          mapRef.current.fitToCoordinates(coordinates, {
-            edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
-            animated: true,
-          });
-        }
+      } else {
+        console.warn("[Route] No route found");
       }
     } catch (error) {
-      console.error("[OSRM Route] Error:", error);
+      console.error("[Route] Error:", error);
     } finally {
       setRouteLoading(false);
     }
   };
 
-  // ✅ Handle pickup input change
+  // ✅ Handle pickup input change with debounced search
   const handlePickupChange = (text: string) => {
     setPickupQuery(text);
     setPickupLocation(text);
@@ -355,11 +352,11 @@ const CreateOnceOffScreen = () => {
     }
 
     searchTimeoutRef.current = setTimeout(() => {
-      searchOSMPlaces(text, "pickup");
-    }, 300);
+      handleSearchPlaces(text, "pickup");
+    }, 350);
   };
 
-  // ✅ Handle dropoff input change
+  // ✅ Handle dropoff input change with debounced search
   const handleDropoffChange = (text: string) => {
     setDropoffQuery(text);
     setDropoffLocation(text);
@@ -370,91 +367,72 @@ const CreateOnceOffScreen = () => {
     }
 
     searchTimeoutRef.current = setTimeout(() => {
-      searchOSMPlaces(text, "dropoff");
-    }, 300);
-  };
-
-  // ✅ Format address for display
-  const formatAddress = (place: OSMPlace): string => {
-    const addr = place.address;
-    if (!addr) return place.display_name;
-
-    const parts = [];
-    if (addr.house_number) parts.push(addr.house_number);
-    if (addr.road) parts.push(addr.road);
-    if (addr.suburb) parts.push(addr.suburb);
-    if (addr.city) parts.push(addr.city);
-    if (addr.postcode) parts.push(addr.postcode);
-
-    return parts.length > 0 ? parts.join(", ") : place.display_name;
+      handleSearchPlaces(text, "dropoff");
+    }, 350);
   };
 
   // ✅ Select pickup suggestion
-  const handleSelectPickupSuggestion = (place: OSMPlace) => {
+  const handleSelectPickupSuggestion = (place: GeoResult) => {
     const coords = {
-      latitude: parseFloat(place.lat),
-      longitude: parseFloat(place.lon),
+      latitude: place.latitude,
+      longitude: place.longitude,
     };
 
-    const formattedAddress = formatAddress(place);
-    setPickupLocation(formattedAddress);
-    setPickupQuery(formattedAddress);
+    const address = place.shortAddress || place.address;
+    setPickupLocation(address);
+    setPickupQuery(address);
     setPickupCoords(coords);
     setPickupSuggestions([]);
     setActiveInput(null);
 
-    if (Platform.OS !== "web" && mapRef.current) {
-      mapRef.current.animateToRegion({
-        ...coords,
-        latitudeDelta: 0.02,
-        longitudeDelta: 0.02,
-      });
-    }
+    setRegion({
+      ...coords,
+      latitudeDelta: 0.02,
+      longitudeDelta: 0.02,
+    });
   };
 
   // ✅ Select dropoff suggestion
-  const handleSelectDropoffSuggestion = (place: OSMPlace) => {
+  const handleSelectDropoffSuggestion = (place: GeoResult) => {
     const coords = {
-      latitude: parseFloat(place.lat),
-      longitude: parseFloat(place.lon),
+      latitude: place.latitude,
+      longitude: place.longitude,
     };
 
-    const formattedAddress = formatAddress(place);
-    setDropoffLocation(formattedAddress);
-    setDropoffQuery(formattedAddress);
+    const address = place.shortAddress || place.address;
+    setDropoffLocation(address);
+    setDropoffQuery(address);
     setDropoffCoords(coords);
     setDropoffSuggestions([]);
     setActiveInput(null);
 
-    if (Platform.OS !== "web" && mapRef.current) {
-      mapRef.current.animateToRegion({
-        ...coords,
-        latitudeDelta: 0.02,
-        longitudeDelta: 0.02,
-      });
+    setRegion({
+      ...coords,
+      latitudeDelta: 0.02,
+      longitudeDelta: 0.02,
+    });
+  };
+
+  // ✅ Handle map press - uses SafeMap coordinate callback
+  const handleMapPress = async (coordinate: Coordinate) => {
+    const { latitude, longitude } = coordinate;
+    const type = activeInput || "pickup";
+
+    const address = await handleReverseGeocode(latitude, longitude, type);
+
+    if (type === "pickup") {
+      setPickupCoords({ latitude, longitude });
+    } else {
+      setDropoffCoords({ latitude, longitude });
     }
   };
 
-  // ✅ Handle map press
-  const handleMapPress = async (e: any) => {
-    if (Platform.OS === "web") return;
-
-    const { latitude, longitude } = e.nativeEvent.coordinate;
-
-    const address = await reverseGeocode(
-      latitude,
-      longitude,
-      activeInput || "pickup"
-    );
-
-    if (activeInput === "pickup" || !activeInput) {
-      setPickupCoords({ latitude, longitude });
-      setPickupLocation(address);
-      setPickupQuery(address);
-    } else {
-      setDropoffCoords({ latitude, longitude });
-      setDropoffLocation(address);
-      setDropoffQuery(address);
+  // ✅ Handle marker press
+  const handleMarkerPress = (markerId: string) => {
+    // Check if it's a driver marker
+    const driver = drivers.find((d) => d._id === markerId);
+    if (driver) {
+      handleSelectDriver(driver);
     }
   };
 
@@ -464,13 +442,8 @@ const CreateOnceOffScreen = () => {
       const homeAddr = tripData.children[0].homeAddress;
       setPickupLocation(homeAddr);
       setPickupQuery(homeAddr);
-      geocodeAddress(homeAddr, "pickup");
-
-      if (Platform.OS === "web") {
-        alert(`Pickup location set to: ${homeAddr}`);
-      } else {
-        Alert.alert("Pickup Set", `Pickup location set to: ${homeAddr}`);
-      }
+      handleGeocodeAddress(homeAddr, "pickup");
+      showAlert("Pickup Set", `Pickup location set to: ${homeAddr}`);
     }
   };
 
@@ -480,13 +453,8 @@ const CreateOnceOffScreen = () => {
       const schoolAddr = tripData.children[0].schoolAddress;
       setDropoffLocation(schoolAddr);
       setDropoffQuery(schoolAddr);
-      geocodeAddress(schoolAddr, "dropoff");
-
-      if (Platform.OS === "web") {
-        alert(`Drop-off location set to: ${schoolAddr}`);
-      } else {
-        Alert.alert("Drop-off Set", `Drop-off location set to: ${schoolAddr}`);
-      }
+      handleGeocodeAddress(schoolAddr, "dropoff");
+      showAlert("Drop-off Set", `Drop-off location set to: ${schoolAddr}`);
     }
   };
 
@@ -516,6 +484,7 @@ const CreateOnceOffScreen = () => {
         setDrivers(data.drivers);
         setStep("drivers");
       } else {
+        // Fallback mock drivers for development
         const mockDrivers: Driver[] = [
           {
             _id: "driver1",
@@ -560,19 +529,11 @@ const CreateOnceOffScreen = () => {
 
         setDrivers(mockDrivers);
         setStep("drivers");
-
-        if (Platform.OS !== "web") {
-          Alert.alert("Info", "Showing available drivers in your area");
-        }
+        showAlert("Info", "Showing available drivers in your area");
       }
     } catch (error) {
       console.error("[Fetch Drivers] Error:", error);
-      const message = "Failed to fetch drivers. Please try again.";
-      if (Platform.OS === "web") {
-        alert(message);
-      } else {
-        Alert.alert("Error", message);
-      }
+      showAlert("Error", "Failed to fetch drivers. Please try again.");
     } finally {
       setLoadingDrivers(false);
     }
@@ -583,35 +544,28 @@ const CreateOnceOffScreen = () => {
     setSelectedDriver(driver);
     setStep("confirm");
 
-    if (Platform.OS !== "web" && mapRef.current) {
-      mapRef.current.animateToRegion({
-        latitude: driver.latitude,
-        longitude: driver.longitude,
-        latitudeDelta: 0.02,
-        longitudeDelta: 0.02,
-      });
-    }
+    setRegion({
+      latitude: driver.latitude,
+      longitude: driver.longitude,
+      latitudeDelta: 0.02,
+      longitudeDelta: 0.02,
+    });
   };
 
   // ✅ Create trip with driver notification
   const handleCreateTrip = async () => {
     if (!selectedDriver) {
-      const message = "Please select a driver";
-      if (Platform.OS === "web") {
-        alert(message);
-      } else {
-        Alert.alert("Error", message);
-      }
+      showAlert("Error", "Please select a driver");
       return;
     }
 
     if (!routeData) {
-      const message = "Route calculation in progress. Please wait.";
-      if (Platform.OS === "web") {
-        alert(message);
-      } else {
-        Alert.alert("Error", message);
-      }
+      showAlert("Error", "Route calculation in progress. Please wait.");
+      return;
+    }
+
+    if (!fareData) {
+      showAlert("Error", "Fare calculation in progress. Please wait.");
       return;
     }
 
@@ -649,7 +603,8 @@ const CreateOnceOffScreen = () => {
         instructions: tripData?.instructions,
         children: tripData?.children,
         status: "pending",
-        fare: calculateFare(),
+        fare: fareData.total,
+        fareBreakdown: fareData,
         estimatedDuration: Math.ceil(routeData.duration / 60),
         estimatedDistance: (routeData.distance / 1000).toFixed(2),
         createdAt: new Date().toISOString(),
@@ -670,86 +625,56 @@ const CreateOnceOffScreen = () => {
       console.log("[Create Trip] Response:", result);
 
       if (response.ok && result.success) {
-        const successMessage = `✅ Trip Request Sent!\n\nDriver: ${selectedDriver.name}\nVehicle: ${selectedDriver.carBrand} ${selectedDriver.carModel}\nRegistration: ${selectedDriver.registrationNumber}\nEstimated Fare: R${calculateFare()}\nDistance: ${(routeData.distance / 1000).toFixed(1)} km\nDuration: ${Math.ceil(routeData.duration / 60)} min\n\nThe driver will receive your request and can accept or decline.`;
+        const successMessage =
+          `✅ Trip Request Sent!\n\n` +
+          `Driver: ${selectedDriver.name}\n` +
+          `Vehicle: ${selectedDriver.carBrand} ${selectedDriver.carModel}\n` +
+          `Registration: ${selectedDriver.registrationNumber}\n` +
+          `Estimated Fare: R${fareData.total}\n` +
+          `Distance: ${(routeData.distance / 1000).toFixed(1)} km\n` +
+          `Duration: ${Math.ceil(routeData.duration / 60)} min\n\n` +
+          `The driver will receive your request and can accept or decline.`;
 
-        if (Platform.OS === "web") {
-          alert(successMessage);
-          router.push("/(tabs)/trips" as any);
-        } else {
-          Alert.alert("Trip Request Sent", successMessage, [
-            {
-              text: "View Trips",
-              onPress: () => {
-                router.push("/(tabs)/trips" as any);
-              },
+        showAlert("Trip Request Sent", successMessage, [
+          {
+            text: "View Trips",
+            onPress: () => {
+              router.push("/(tabs)/trips" as any);
             },
-          ]);
-        }
+          },
+        ]);
       } else {
-        const message = result.message || "Failed to create trip";
-        if (Platform.OS === "web") {
-          alert(message);
-        } else {
-          Alert.alert("Error", message);
-        }
+        showAlert("Error", result.message || "Failed to create trip");
       }
     } catch (error) {
       console.error("[Create Trip] Error:", error);
-      const message = "Network error. Please try again.";
-      if (Platform.OS === "web") {
-        alert(message);
-      } else {
-        Alert.alert("Error", message);
-      }
+      showAlert("Error", "Network error. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ Calculate fare
-  const calculateFare = () => {
-    if (!routeData) return 0;
-
-    const distanceKm = routeData.distance / 1000;
-    const baseFare = 25;
-    const perKm = 12;
-    const timeFactor = Math.ceil(routeData.duration / 60) * 0.5;
-
-    return Math.round(baseFare + distanceKm * perKm + timeFactor);
-  };
-
   // ✅ Continue to driver selection
   const handleContinue = () => {
     if (!pickupLocation || !dropoffLocation) {
-      const message = "Please set both pickup and drop-off locations";
-      if (Platform.OS === "web") {
-        alert(message);
-      } else {
-        Alert.alert("Error", message);
-      }
+      showAlert("Error", "Please set both pickup and drop-off locations");
       return;
     }
 
     if (!routeData) {
-      const message = "Calculating route. Please wait...";
-      if (Platform.OS === "web") {
-        alert(message);
-      } else {
-        Alert.alert("Info", message);
-      }
+      showAlert("Info", "Calculating route. Please wait...");
       return;
     }
 
     fetchDrivers();
   };
 
-  // ✅ Format distance
+  // ✅ Format helpers
   const formatDistance = (meters: number) => {
     const km = meters / 1000;
     return km < 1 ? `${Math.round(meters)} m` : `${km.toFixed(1)} km`;
   };
 
-  // ✅ Format duration
   const formatDuration = (seconds: number) => {
     const minutes = Math.ceil(seconds / 60);
     return minutes < 60
@@ -757,111 +682,73 @@ const CreateOnceOffScreen = () => {
       : `${Math.floor(minutes / 60)}h ${minutes % 60}min`;
   };
 
-  // ✅ Render Native Map
-  const renderNativeMap = () => {
-    if (Platform.OS === "web" || !MapView) return null;
+  // ✅ Build map markers
+  const buildMapMarkers = (): SafeMapMarker[] => {
+    const mapMarkers: SafeMapMarker[] = [
+      {
+        id: "pickup",
+        coordinate: pickupCoords,
+        title: "Pickup",
+        description: pickupLocation,
+        type: "pickup",
+      },
+      {
+        id: "dropoff",
+        coordinate: dropoffCoords,
+        title: "Drop-off",
+        description: dropoffLocation,
+        type: "dropoff",
+      },
+    ];
 
-    return (
-      <MapView
-        ref={mapRef}
-        provider={PROVIDER_GOOGLE}
-        style={styles.map}
-        initialRegion={region}
-        onPress={handleMapPress}
-      >
-        {routeData && routeData.coordinates.length > 0 && (
-          <Polyline
-            coordinates={routeData.coordinates}
-            strokeColor="#7E2EFF"
-            strokeWidth={4}
-          />
-        )}
+    // Add driver markers
+    drivers.forEach((driver) => {
+      mapMarkers.push({
+        id: driver._id,
+        coordinate: {
+          latitude: driver.latitude,
+          longitude: driver.longitude,
+        },
+        title: driver.name,
+        description: `${driver.carBrand} ${driver.carModel} - ${driver.registrationNumber}`,
+        type: "driver",
+        selected: selectedDriver?._id === driver._id,
+      });
+    });
 
-        <Marker
-          coordinate={pickupCoords}
-          title="Pickup"
-          description={pickupLocation}
-        >
-          <View style={styles.pickupMarker}>
-            <Ionicons name="location" size={28} color="#00C853" />
-          </View>
-        </Marker>
-
-        <Marker
-          coordinate={dropoffCoords}
-          title="Drop-off"
-          description={dropoffLocation}
-        >
-          <View style={styles.dropoffMarker}>
-            <Ionicons name="location" size={28} color="#FF5252" />
-          </View>
-        </Marker>
-
-        {drivers.map((driver) => (
-          <Marker
-            key={driver._id}
-            coordinate={{
-              latitude: driver.latitude,
-              longitude: driver.longitude,
-            }}
-            title={driver.name}
-            description={`${driver.carBrand} ${driver.carModel} - ${driver.registrationNumber}`}
-          >
-            <View
-              style={[
-                styles.driverMarker,
-                selectedDriver?._id === driver._id && styles.selectedDriverMarker,
-              ]}
-            >
-              <Ionicons
-                name="car"
-                size={24}
-                color={selectedDriver?._id === driver._id ? "#fff" : "#7E2EFF"}
-              />
-            </View>
-          </Marker>
-        ))}
-      </MapView>
-    );
+    return mapMarkers;
   };
 
-  // ✅ Render Web Map
-  const renderWebMap = () => {
-    if (Platform.OS !== "web") return null;
+  // ✅ Build map routes
+  const buildMapRoutes = (): SafeMapRoute[] => {
+    if (!routeData || !routeData.coordinates || routeData.coordinates.length < 2) {
+      return [];
+    }
 
-    return (
-      <View style={styles.webMapPlaceholder}>
-        <Ionicons name="map-outline" size={64} color="#E0E0E0" />
-        <Text style={styles.webMapText}>Map View</Text>
-        <Text style={styles.webMapSubtext}>
-          Search for locations below to set pickup and drop-off points
-        </Text>
-        {routeData && (
-          <View style={styles.webRouteInfo}>
-            <Text style={styles.webRouteText}>
-              📍 Distance: {formatDistance(routeData.distance)}
-            </Text>
-            <Text style={styles.webRouteText}>
-              ⏱️ Duration: {formatDuration(routeData.duration)}
-            </Text>
-          </View>
-        )}
-      </View>
-    );
+    return [
+      {
+        coordinates: routeData.coordinates,
+        color: "#7E2EFF",
+        width: 4,
+      },
+    ];
   };
 
-  // ✅ Render suggestions
+  // ✅ Render suggestions list
   const renderSuggestions = (
-    suggestions: OSMPlace[],
-    loading: boolean,
+    suggestions: GeoResult[],
+    isLoading: boolean,
     type: "pickup" | "dropoff"
   ) => {
     if (activeInput !== type) return null;
-    if (loading) {
+
+    if (isLoading) {
       return (
         <View style={styles.suggestionsContainer}>
-          <ActivityIndicator size="small" color="#7E2EFF" />
-          <Text style={styles.loadingText}>Searching locations...</Text>
+          <View style={styles.suggestionsLoading}>
+            <ActivityIndicator size="small" color="#7E2EFF" />
+            <Text style={styles.loadingText}>Searching locations...</Text>
+          </View>
         </View>
       );
     }
@@ -869,10 +756,14 @@ const CreateOnceOffScreen = () => {
     if (suggestions.length === 0) return null;
 
     return (
-      <ScrollView style={styles.suggestionsContainer} keyboardShouldPersistTaps="handled">
-        {suggestions.map((place) => (
+      <ScrollView
+        style={styles.suggestionsContainer}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+      >
+        {suggestions.map((place, index) => (
           <TouchableOpacity
-            key={place.place_id}
+            key={`${place.id}-${index}`}
             style={styles.suggestionItem}
             onPress={() =>
               type === "pickup"
@@ -883,12 +774,13 @@ const CreateOnceOffScreen = () => {
             <Ionicons name="location-outline" size={18} color="#666" />
             <View style={styles.suggestionTextContainer}>
               <Text style={styles.suggestionText} numberOfLines={2}>
-                {formatAddress(place)}
+                {place.shortAddress || place.address}
               </Text>
-              {place.address?.city && (
+              {place.city && (
                 <Text style={styles.suggestionSubtext}>
-                  {place.address.city}
-                  {place.address.state && `, ${place.address.state}`}
+                  {place.city}
+                  {place.state && `, ${place.state}`}
+                  {place.postcode && ` ${place.postcode}`}
                 </Text>
               )}
             </View>
@@ -898,10 +790,15 @@ const CreateOnceOffScreen = () => {
     );
   };
 
+  // ✅ RENDER
   return (
     <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+        >
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Book Trip</Text>
@@ -910,16 +807,28 @@ const CreateOnceOffScreen = () => {
         </View>
       </View>
 
-      {renderNativeMap()}
-      {renderWebMap()}
+      {/* ✅ SafeMap - Universal map component (works on all platforms) */}
+      <SafeMap
+        region={region}
+        markers={buildMapMarkers()}
+        routes={buildMapRoutes()}
+        onMapPress={handleMapPress}
+        onMarkerPress={handleMarkerPress}
+        onRegionChange={(newRegion) => setRegion(newRegion)}
+        showUserLocation={false}
+      />
 
+      {/* Route loading banner */}
       {routeLoading && (
         <View style={styles.routeLoadingBanner}>
           <ActivityIndicator size="small" color="#fff" />
-          <Text style={styles.routeLoadingText}>Calculating best route...</Text>
+          <Text style={styles.routeLoadingText}>
+            Calculating best route...
+          </Text>
         </View>
       )}
 
+      {/* Bottom Sheet */}
       <Animated.View
         style={[
           styles.bottomSheet,
@@ -939,6 +848,7 @@ const CreateOnceOffScreen = () => {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Step Indicator */}
           <View style={styles.stepIndicator}>
             <View
               style={[
@@ -962,37 +872,54 @@ const CreateOnceOffScreen = () => {
             />
           </View>
 
+          {/* ===== STEP 1: LOCATIONS ===== */}
           {step === "locations" && (
             <View>
               <Text style={styles.sheetTitle}>Set Trip Locations</Text>
               <Text style={styles.sheetSubtext}>
                 {Platform.OS === "web"
-                  ? "Search for precise addresses or use quick options"
+                  ? "Search for precise addresses, click the map, or use quick options"
                   : "Search, tap map, or use quick options"}
               </Text>
 
+              {/* Pickup Location */}
               <View style={styles.locationSection}>
                 <View style={styles.locationHeader}>
                   <View style={styles.locationIconCircle}>
-                    <Ionicons name="radio-button-on" size={16} color="#00C853" />
+                    <Ionicons
+                      name="radio-button-on"
+                      size={16}
+                      color="#00C853"
+                    />
                   </View>
                   <Text style={styles.locationLabel}>Pickup Location</Text>
                 </View>
                 <TextInput
-                  style={styles.input}
+                  style={[
+                    styles.input,
+                    activeInput === "pickup" && styles.inputActive,
+                  ]}
                   placeholder="Search for pickup address..."
                   placeholderTextColor="#999"
                   value={pickupQuery}
                   onChangeText={handlePickupChange}
                   onFocus={() => setActiveInput("pickup")}
                 />
-                {renderSuggestions(pickupSuggestions, pickupSearchLoading, "pickup")}
-                <TouchableOpacity style={styles.quickButton} onPress={useHomeAddress}>
+                {renderSuggestions(
+                  pickupSuggestions,
+                  pickupSearchLoading,
+                  "pickup"
+                )}
+                <TouchableOpacity
+                  style={styles.quickButton}
+                  onPress={useHomeAddress}
+                >
                   <Ionicons name="home-outline" size={16} color="#7E2EFF" />
                   <Text style={styles.quickButtonText}>Use Home Address</Text>
                 </TouchableOpacity>
               </View>
 
+              {/* Drop-off Location */}
               <View style={styles.locationSection}>
                 <View style={styles.locationHeader}>
                   <View style={styles.locationIconCircle}>
@@ -1001,7 +928,10 @@ const CreateOnceOffScreen = () => {
                   <Text style={styles.locationLabel}>Drop-off Location</Text>
                 </View>
                 <TextInput
-                  style={styles.input}
+                  style={[
+                    styles.input,
+                    activeInput === "dropoff" && styles.inputActive,
+                  ]}
                   placeholder="Search for drop-off address..."
                   placeholderTextColor="#999"
                   value={dropoffQuery}
@@ -1013,13 +943,19 @@ const CreateOnceOffScreen = () => {
                   dropoffSearchLoading,
                   "dropoff"
                 )}
-                <TouchableOpacity style={styles.quickButton} onPress={useSchoolAddress}>
+                <TouchableOpacity
+                  style={styles.quickButton}
+                  onPress={useSchoolAddress}
+                >
                   <Ionicons name="school-outline" size={16} color="#7E2EFF" />
-                  <Text style={styles.quickButtonText}>Use School Address</Text>
+                  <Text style={styles.quickButtonText}>
+                    Use School Address
+                  </Text>
                 </TouchableOpacity>
               </View>
 
-              {routeData && (
+              {/* Route Info Card */}
+              {routeData && fareData && (
                 <View style={styles.routeInfoCard}>
                   <Text style={styles.routeInfoTitle}>Trip Overview</Text>
                   <View style={styles.routeInfoRow}>
@@ -1037,17 +973,22 @@ const CreateOnceOffScreen = () => {
                   <View style={styles.routeInfoRow}>
                     <Ionicons name="cash" size={16} color="#00C853" />
                     <Text style={styles.routeInfoText}>
-                      Estimated Fare: R{calculateFare()}
+                      Estimated Fare: R{fareData.total}
                     </Text>
                   </View>
                 </View>
               )}
 
+              {/* Scheduled Details */}
               {tripData && (
                 <View style={styles.tripInfo}>
                   <Text style={styles.tripInfoTitle}>Scheduled Details</Text>
                   <View style={styles.tripInfoRow}>
-                    <Ionicons name="calendar-outline" size={16} color="#666" />
+                    <Ionicons
+                      name="calendar-outline"
+                      size={16}
+                      color="#666"
+                    />
                     <Text style={styles.tripInfoText}>
                       {new Date(tripData.date).toLocaleDateString("en-ZA", {
                         weekday: "short",
@@ -1059,7 +1000,9 @@ const CreateOnceOffScreen = () => {
                   </View>
                   <View style={styles.tripInfoRow}>
                     <Ionicons name="time-outline" size={16} color="#666" />
-                    <Text style={styles.tripInfoText}>{tripData.pickupTime}</Text>
+                    <Text style={styles.tripInfoText}>
+                      {tripData.pickupTime}
+                    </Text>
                   </View>
                   <View style={styles.tripInfoRow}>
                     <Ionicons name="people-outline" size={16} color="#666" />
@@ -1071,6 +1014,7 @@ const CreateOnceOffScreen = () => {
                 </View>
               )}
 
+              {/* Continue Button */}
               <TouchableOpacity
                 style={[
                   styles.continueButton,
@@ -1083,7 +1027,9 @@ const CreateOnceOffScreen = () => {
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <>
-                    <Text style={styles.continueButtonText}>Find Available Drivers</Text>
+                    <Text style={styles.continueButtonText}>
+                      Find Available Drivers
+                    </Text>
                     <Ionicons name="arrow-forward" size={20} color="#fff" />
                   </>
                 )}
@@ -1091,12 +1037,13 @@ const CreateOnceOffScreen = () => {
             </View>
           )}
 
+          {/* ===== STEP 2: DRIVERS ===== */}
           {step === "drivers" && (
             <View>
               <Text style={styles.sheetTitle}>Select Driver</Text>
               <Text style={styles.sheetSubtext}>
-                {drivers.length} driver{drivers.length !== 1 ? "s" : ""} available
-                nearby
+                {drivers.length} driver{drivers.length !== 1 ? "s" : ""}{" "}
+                available nearby
               </Text>
 
               {drivers.map((driver) => (
@@ -1120,7 +1067,9 @@ const CreateOnceOffScreen = () => {
                     <View style={styles.driverMeta}>
                       <View style={styles.driverMetaItem}>
                         <Ionicons name="star" size={14} color="#FFB800" />
-                        <Text style={styles.driverMetaText}>{driver.rating}</Text>
+                        <Text style={styles.driverMetaText}>
+                          {driver.rating}
+                        </Text>
                       </View>
                       <View style={styles.driverMetaItem}>
                         <Ionicons name="navigate" size={14} color="#666" />
@@ -1148,13 +1097,15 @@ const CreateOnceOffScreen = () => {
             </View>
           )}
 
-          {step === "confirm" && selectedDriver && routeData && (
+          {/* ===== STEP 3: CONFIRM ===== */}
+          {step === "confirm" && selectedDriver && routeData && fareData && (
             <View>
               <Text style={styles.sheetTitle}>Confirm Trip Request</Text>
               <Text style={styles.sheetSubtext}>
                 Driver will be notified and can accept or decline
               </Text>
 
+              {/* Driver Card */}
               <View style={styles.confirmCard}>
                 <Text style={styles.confirmLabel}>Your Driver</Text>
                 <View style={styles.confirmDriverRow}>
@@ -1174,19 +1125,24 @@ const CreateOnceOffScreen = () => {
                     <View style={styles.confirmDriverRating}>
                       <Ionicons name="star" size={14} color="#FFB800" />
                       <Text style={styles.confirmDriverRatingText}>
-                        {selectedDriver.rating} • {selectedDriver.distance.toFixed(1)} km
-                        away
+                        {selectedDriver.rating} •{" "}
+                        {selectedDriver.distance.toFixed(1)} km away
                       </Text>
                     </View>
                   </View>
                 </View>
               </View>
 
+              {/* Trip Summary */}
               <View style={styles.confirmCard}>
                 <Text style={styles.confirmLabel}>Trip Summary</Text>
                 <View style={styles.confirmRow}>
                   <View style={styles.confirmIconCircle}>
-                    <Ionicons name="radio-button-on" size={12} color="#00C853" />
+                    <Ionicons
+                      name="radio-button-on"
+                      size={12}
+                      color="#00C853"
+                    />
                   </View>
                   <Text style={styles.confirmText} numberOfLines={2}>
                     {pickupLocation}
@@ -1203,6 +1159,7 @@ const CreateOnceOffScreen = () => {
                 </View>
               </View>
 
+              {/* Route Details */}
               <View style={styles.confirmCard}>
                 <Text style={styles.confirmLabel}>Route Details</Text>
                 <View style={styles.confirmRow}>
@@ -1220,23 +1177,29 @@ const CreateOnceOffScreen = () => {
                 <View style={styles.confirmRow}>
                   <Ionicons name="calendar" size={16} color="#666" />
                   <Text style={styles.confirmText}>
-                    {new Date(tripData?.date || "").toLocaleDateString("en-ZA")} at{" "}
-                    {tripData?.pickupTime}
+                    {new Date(tripData?.date || "").toLocaleDateString(
+                      "en-ZA"
+                    )}{" "}
+                    at {tripData?.pickupTime}
                   </Text>
                 </View>
               </View>
 
+              {/* Fare Breakdown */}
               <View style={styles.fareCard}>
                 <View style={styles.fareRow}>
                   <Text style={styles.fareLabel}>Base Fare</Text>
-                  <Text style={styles.fareValue}>R25</Text>
+                  <Text style={styles.fareValue}>
+                    R{fareData.baseFare}
+                  </Text>
                 </View>
                 <View style={styles.fareRow}>
                   <Text style={styles.fareLabel}>
-                    Distance ({(routeData.distance / 1000).toFixed(1)} km)
+                    Distance (
+                    {(routeData.distance / 1000).toFixed(1)} km)
                   </Text>
                   <Text style={styles.fareValue}>
-                    R{Math.round((routeData.distance / 1000) * 12)}
+                    R{fareData.distanceFare}
                   </Text>
                 </View>
                 <View style={styles.fareRow}>
@@ -1244,18 +1207,44 @@ const CreateOnceOffScreen = () => {
                     Time ({Math.ceil(routeData.duration / 60)} min)
                   </Text>
                   <Text style={styles.fareValue}>
-                    R{Math.round(Math.ceil(routeData.duration / 60) * 0.5)}
+                    R{fareData.timeFare}
                   </Text>
                 </View>
+                {fareData.childrenFare > 0 && (
+                  <View style={styles.fareRow}>
+                    <Text style={styles.fareLabel}>
+                      Additional Children
+                    </Text>
+                    <Text style={styles.fareValue}>
+                      R{fareData.childrenFare}
+                    </Text>
+                  </View>
+                )}
+                {fareData.discount > 0 && (
+                  <View style={styles.fareRow}>
+                    <Text style={[styles.fareLabel, { color: "#00C853" }]}>
+                      Discount
+                    </Text>
+                    <Text style={[styles.fareValue, { color: "#00C853" }]}>
+                      -R{fareData.discount}
+                    </Text>
+                  </View>
+                )}
                 <View style={styles.fareDivider} />
                 <View style={styles.fareRow}>
                   <Text style={styles.fareTotalLabel}>Total Fare</Text>
-                  <Text style={styles.fareTotalValue}>R{calculateFare()}</Text>
+                  <Text style={styles.fareTotalValue}>
+                    R{fareData.total}
+                  </Text>
                 </View>
               </View>
 
+              {/* Create Trip Button */}
               <TouchableOpacity
-                style={[styles.createButton, loading && styles.buttonDisabled]}
+                style={[
+                  styles.createButton,
+                  loading && styles.buttonDisabled,
+                ]}
                 onPress={handleCreateTrip}
                 disabled={loading}
               >
@@ -1263,12 +1252,15 @@ const CreateOnceOffScreen = () => {
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <>
-                    <Text style={styles.createButtonText}>Send Trip Request</Text>
+                    <Text style={styles.createButtonText}>
+                      Send Trip Request
+                    </Text>
                     <Ionicons name="paper-plane" size={20} color="#fff" />
                   </>
                 )}
               </TouchableOpacity>
 
+              {/* Back Button */}
               <TouchableOpacity
                 style={styles.backButtonBottom}
                 onPress={() => {
@@ -1277,7 +1269,9 @@ const CreateOnceOffScreen = () => {
                 }}
               >
                 <Ionicons name="arrow-back" size={18} color="#7E2EFF" />
-                <Text style={styles.backButtonText}>Choose Different Driver</Text>
+                <Text style={styles.backButtonText}>
+                  Choose Different Driver
+                </Text>
               </TouchableOpacity>
             </View>
           )}
@@ -1287,6 +1281,9 @@ const CreateOnceOffScreen = () => {
   );
 };
 
+// ============================================
+// STYLES
+// ============================================
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1304,7 +1301,7 @@ const styles = StyleSheet.create({
     ...Platform.select({
       web: {
         boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
-      },
+      } as any,
       default: {
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
@@ -1334,102 +1331,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 14,
     letterSpacing: 1,
-  },
-  map: {
-    flex: 1,
-  },
-  webMapPlaceholder: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#F8F9FA",
-    paddingHorizontal: 20,
-  },
-  webMapText: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#999",
-    marginTop: 12,
-  },
-  webMapSubtext: {
-    fontSize: 13,
-    color: "#CCC",
-    marginTop: 4,
-    textAlign: "center",
-  },
-  webRouteInfo: {
-    marginTop: 20,
-    backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 12,
-    gap: 8,
-  },
-  webRouteText: {
-    fontSize: 14,
-    color: "#333",
-    fontWeight: "600",
-  },
-  pickupMarker: {
-    backgroundColor: "#fff",
-    borderRadius: 25,
-    padding: 8,
-    borderWidth: 3,
-    borderColor: "#00C853",
-    ...Platform.select({
-      default: {
-        shadowColor: "#00C853",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 4,
-      },
-    }),
-  },
-  dropoffMarker: {
-    backgroundColor: "#fff",
-    borderRadius: 25,
-    padding: 8,
-    borderWidth: 3,
-    borderColor: "#FF5252",
-    ...Platform.select({
-      default: {
-        shadowColor: "#FF5252",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 4,
-      },
-    }),
-  },
-  driverMarker: {
-    backgroundColor: "#fff",
-    borderRadius: 20,
-    padding: 8,
-    borderWidth: 2,
-    borderColor: "#7E2EFF",
-    ...Platform.select({
-      default: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 4,
-        elevation: 4,
-      },
-    }),
-  },
-  selectedDriverMarker: {
-    backgroundColor: "#7E2EFF",
-    borderWidth: 3,
-    borderColor: "#fff",
-    ...Platform.select({
-      default: {
-        shadowColor: "#7E2EFF",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.4,
-        shadowRadius: 8,
-        elevation: 8,
-      },
-    }),
   },
   routeLoadingBanner: {
     position: "absolute",
@@ -1463,6 +1364,9 @@ const styles = StyleSheet.create({
     paddingBottom: 30,
     maxHeight: "70%",
     ...Platform.select({
+      web: {
+        boxShadow: "0 -4px 12px rgba(0,0,0,0.15)",
+      } as any,
       default: {
         shadowColor: "#000",
         shadowOffset: { width: 0, height: -4 },
@@ -1539,6 +1443,10 @@ const styles = StyleSheet.create({
     color: "#1A1A1A",
     backgroundColor: "#F8F9FA",
   },
+  inputActive: {
+    borderColor: "#7E2EFF",
+    backgroundColor: "#fff",
+  },
   suggestionsContainer: {
     marginTop: 8,
     backgroundColor: "#fff",
@@ -1547,6 +1455,9 @@ const styles = StyleSheet.create({
     borderColor: "#E0E0E0",
     maxHeight: 250,
     ...Platform.select({
+      web: {
+        boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+      } as any,
       default: {
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
@@ -1556,8 +1467,13 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  suggestionsLoading: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    gap: 12,
+  },
   loadingText: {
-    marginLeft: 12,
     fontSize: 13,
     color: "#666",
   },
@@ -1654,6 +1570,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 8,
     ...Platform.select({
+      web: {
+        boxShadow: "0 4px 12px rgba(126,46,255,0.3)",
+      } as any,
       default: {
         shadowColor: "#7E2EFF",
         shadowOffset: { width: 0, height: 4 },
@@ -1866,6 +1785,9 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 12,
     ...Platform.select({
+      web: {
+        boxShadow: "0 4px 12px rgba(0,200,83,0.3)",
+      } as any,
       default: {
         shadowColor: "#00C853",
         shadowOffset: { width: 0, height: 4 },
